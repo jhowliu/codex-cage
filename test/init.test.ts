@@ -21,6 +21,8 @@ test("init creates config, env example, and gitignore entries", async () => {
     const config = await readFile(join(cwd, ".codex-cage.yml"), "utf8");
     assert.match(config, /verify:/);
     assert.match(config, /Replace this with your real test command/);
+    assert.match(config, /runtime:/);
+    assert.match(config, /ghcr\.io\/jhowliu\/codex-cage\/base:0\.1\.0/);
 
     const envExample = await readFile(join(cwd, ".codex-cage.env.example"), "utf8");
     assert.match(envExample, /OPENAI_API_KEY=/);
@@ -54,7 +56,7 @@ test("init can create optional Dockerfile", async () => {
 
     assert.ok(result.created.includes(".codex-cage/Dockerfile"));
     const dockerfile = await readFile(join(cwd, ".codex-cage", "Dockerfile"), "utf8");
-    assert.match(dockerfile, /FROM node:22-bookworm/);
+    assert.match(dockerfile, /FROM ghcr\.io\/jhowliu\/codex-cage\/base:0\.1\.0/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

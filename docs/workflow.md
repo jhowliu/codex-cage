@@ -83,6 +83,10 @@ services:
   ready:
     - pg_isready -h db -U postgres
 
+runtime:
+  image: ghcr.io/jhowliu/codex-cage/base:0.1.0
+  dockerfile: null
+
 agent:
   model: gpt-5.4
   max_iterations: 5
@@ -109,6 +113,8 @@ guards:
 ```
 
 `verify` must contain at least one command. The generated default intentionally fails until replaced with the target repo's real validation command.
+
+`runtime.image` accepts any valid Docker image reference and defaults to the Codex Cage GHCR base image. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image before cloning the target repository. The first version uses `.codex-cage/` as the Docker build context, so target runtime Dockerfiles should keep package-install inputs inside that directory.
 
 ## Running GitHub Issues
 

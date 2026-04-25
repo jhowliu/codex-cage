@@ -169,6 +169,7 @@ function removeUndefinedProperties<TValue extends Record<string, unknown>>(
 function formatCleanupReport(report: CleanupDockerReport): string {
   const lines = [
     `Removed containers: ${formatRemovedResources(report.containers)}`,
+    `Removed images: ${formatRemovedResources(report.images)}`,
     `Removed networks: ${formatRemovedResources(report.networks)}`,
     `Removed volumes: ${formatRemovedResources(report.volumes)}`,
   ];
@@ -179,6 +180,7 @@ function formatCleanupReport(report: CleanupDockerReport): string {
 
   if (
     report.containers.length === 0 &&
+    report.images.length === 0 &&
     report.networks.length === 0 &&
     report.volumes.length === 0
   ) {

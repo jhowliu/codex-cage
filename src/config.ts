@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defaultSandboxImage } from "./docker.js";
 
 export const codexCageConfigSchema = z
   .object({
@@ -10,6 +11,12 @@ export const codexCageConfigSchema = z
         ready: z.array(z.string()).default([]),
       })
       .default(() => ({ compose: null, ready: [] })),
+    runtime: z
+      .object({
+        image: z.string().min(1).default(defaultSandboxImage),
+        dockerfile: z.string().min(1).nullable().default(null),
+      })
+      .default(() => ({ image: defaultSandboxImage, dockerfile: null })),
     agent: z
       .object({
         model: z.string().default("gpt-5.4"),
@@ -64,6 +71,7 @@ const knownTopLevelKeys = new Set([
   "setup",
   "verify",
   "services",
+  "runtime",
   "agent",
   "timeouts",
   "pr",

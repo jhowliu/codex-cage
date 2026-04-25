@@ -31,6 +31,7 @@ export const failureCodes = [
   "missing_config",
   "invalid_config",
   "setup_failed",
+  "runtime_image_failed",
   "verify_failed",
   "review_blocking",
   "secret_guard_failed",
@@ -45,6 +46,7 @@ export type FailureCode = (typeof failureCodes)[number];
 
 export const phaseNames = [
   "preflight",
+  "runtime_image",
   "cloning",
   "setup",
   "implement",

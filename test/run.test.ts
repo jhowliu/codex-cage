@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { DockerSandbox, DockerSandboxOptions } from "../src/docker.js";
+import {
+  defaultSandboxImage,
+  type DockerSandbox,
+  type DockerSandboxOptions,
+} from "../src/docker.js";
 import type { IssueContext } from "../src/issue.js";
 import type { CommandResult, PublishSuccessfulRunInput } from "../src/publish.js";
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
@@ -105,6 +109,7 @@ verify:
   - npm test
 `);
   const events: string[] = [];
+  const sandboxOptions: DockerSandboxOptions[] = [];
   const shell = shellRunner(
     new Map([
       ["git fetch origin", commandResult()],
@@ -140,7 +145,10 @@ verify:
           redactedCloneUrl:
             "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
         }),
-        createDockerSandbox: (_options: DockerSandboxOptions) => fakeSandbox(events),
+        createDockerSandbox: (options: DockerSandboxOptions) => {
+          sandboxOptions.push(options);
+          return fakeSandbox(events);
+        },
         createShellRunner: () => shell,
         runIndependentReview: async () => passingReview(),
         publishSuccessfulRun: async (input) => {
@@ -163,6 +171,11 @@ verify:
       prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
     });
     assert.deepEqual(events, ["sandbox:create", "sandbox:clone", "sandbox:cleanup"]);
+    assert.equal(sandboxOptions[0]?.image, defaultSandboxImage);
+    assert.deepEqual(sandboxOptions[0]?.env, {
+      GH_TOKEN: "token-value",
+      GITHUB_TOKEN: "token-value",
+    });
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
 
@@ -176,6 +189,159 @@ verify:
       details.phases.map((phase) => phase.name),
       ["preflight", "cloning", "implement", "verify", "review", "pr"],
     );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runCodexCage builds configured runtime Dockerfiles before cloning", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+runtime:
+  image: registry.example.com/base:custom
+  dockerfile: .codex-cage/Dockerfile
+`);
+  const events: string[] = [];
+  const sandboxOptions: DockerSandboxOptions[] = [];
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      [
+        "git add --intent-to-add",
+        commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+      ],
+    ]),
+  );
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-image-123",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        buildRuntimeImage: async (options) => {
+          events.push(`build:${options.dockerfilePath}:${options.contextPath}`);
+          return {
+            image: "codex-cage/runtime-run-image-123:latest",
+            dockerfilePath: options.dockerfilePath,
+            contextPath: options.contextPath,
+          };
+        },
+        createDockerSandbox: (options) => {
+          sandboxOptions.push(options);
+          return fakeSandbox(events);
+        },
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async (input) => ({
+          branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+          commitMessage: "#26 Wire run command",
+          prTitle: "#26 Wire run command",
+          prBody: "body",
+          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+        }),
+      },
+    );
+
+    assert.equal(result.status, "succeeded");
+    assert.match(events[0] ?? "", /build:/);
+    assert.deepEqual(events.slice(1), [
+      "sandbox:create",
+      "sandbox:clone",
+      "sandbox:cleanup",
+    ]);
+    assert.equal(sandboxOptions[0]?.image, "codex-cage/runtime-run-image-123:latest");
+
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails("run-image-123");
+    const runtimeImage = await readFile(
+      join(cwd, ".codex-cage", "runs", "run-image-123", "runtime-image.json"),
+      "utf8",
+    );
+    store.close();
+
+    assert.deepEqual(
+      details.phases.map((phase) => phase.name),
+      ["preflight", "runtime_image", "cloning", "implement", "verify", "review", "pr"],
+    );
+    assert.match(runtimeImage, /codex-cage\/runtime-run-image-123:latest/);
+    assert.match(runtimeImage, /"source": "built"/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runCodexCage records runtime image build failures", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+runtime:
+  dockerfile: .codex-cage/Dockerfile
+`);
+  const events: string[] = [];
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-image-failed",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        buildRuntimeImage: async () => {
+          events.push("build");
+          throw new Error("docker build failed");
+        },
+        createDockerSandbox: () => {
+          throw new Error("sandbox should not be created after image build failure");
+        },
+      },
+    );
+
+    assert.deepEqual(result, {
+      runId: "run-image-failed",
+      status: "failed",
+      failureCode: "runtime_image_failed",
+      prUrl: null,
+    });
+    assert.deepEqual(events, ["build"]);
+
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails("run-image-failed");
+    store.close();
+
+    assert.equal(details.run.failureCode, "runtime_image_failed");
+    assert.equal(details.phases.at(-1)?.name, "runtime_image");
+    assert.equal(details.phases.at(-1)?.status, "failed");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
