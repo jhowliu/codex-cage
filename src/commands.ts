@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { initProject } from "./init.js";
 import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
@@ -127,7 +128,36 @@ export function createCli(): Command {
     .command("cleanup")
     .description("Remove stale Docker resources managed by Codex Cage.")
     .option("--all", "remove all managed Docker resources, including active ones")
-    .action(notImplemented("cleanup"));
+    .action(async (options: { all?: boolean }) => {
+      const report = await cleanupManagedDockerResources({ all: options.all === true });
+      console.log(formatCleanupReport(report));
+    });
 
   return program;
+}
+
+function formatCleanupReport(report: CleanupDockerReport): string {
+  const lines = [
+    `Removed containers: ${formatRemovedResources(report.containers)}`,
+    `Removed networks: ${formatRemovedResources(report.networks)}`,
+    `Removed volumes: ${formatRemovedResources(report.volumes)}`,
+  ];
+
+  if (report.skippedActiveRunIds.length > 0) {
+    lines.push(`Skipped active runs: ${report.skippedActiveRunIds.join(", ")}`);
+  }
+
+  if (
+    report.containers.length === 0 &&
+    report.networks.length === 0 &&
+    report.volumes.length === 0
+  ) {
+    lines.push("No managed Docker resources removed.");
+  }
+
+  return lines.join("\n");
+}
+
+function formatRemovedResources(resources: string[]): string {
+  return resources.length === 0 ? "none" : resources.join(", ");
 }
