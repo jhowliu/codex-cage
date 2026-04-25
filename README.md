@@ -10,7 +10,7 @@ Full setup, token, configuration, security, and QA details live in [docs/workflo
 codex-cage --help
 codex-cage init
 codex-cage init --dockerfile
-codex-cage run --issue <url>
+codex-cage run <url>
 codex-cage runs list
 codex-cage runs show <run-id>
 codex-cage cleanup
@@ -59,10 +59,12 @@ Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such 
 ## Run an Issue
 
 ```bash
-codex-cage run --issue https://github.com/OWNER/REPO/issues/123
+codex-cage run https://github.com/OWNER/REPO/issues/123
 ```
 
 The `run` command reads `.codex-cage.yml` and `.codex-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
+
+Passing the issue URL positionally is preferred. `--issue <url>` remains supported for compatibility.
 
 ## Issue Context
 
