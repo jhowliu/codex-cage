@@ -17,7 +17,7 @@ function runCli(args: string[], cwd?: string) {
   });
 }
 
-test("root help lists MVP commands", () => {
+test("root help lists commands", () => {
   const result = runCli(["--help"]);
 
   assert.equal(result.status, 0);
@@ -28,7 +28,7 @@ test("root help lists MVP commands", () => {
   assert.match(result.stdout, /\bcleanup\b/);
 });
 
-test("command help is available for MVP commands", () => {
+test("command help is available for commands", () => {
   const commands = [
     ["init", "--help"],
     ["run", "--help"],

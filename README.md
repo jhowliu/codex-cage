@@ -2,6 +2,8 @@
 
 Codex Cage is a lightweight CLI for running Codex against issue-driven work in an isolated Docker workspace. The project is currently in early scaffold form: the CLI exists, `init` works, and the later run/orchestration commands are intentionally stubbed until their implementation slices land.
 
+Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
+
 ## Current Commands
 
 ```bash
@@ -128,6 +130,7 @@ Cleanup removes Docker resources labeled as managed by Codex Cage. By default it
 npm install
 npm run typecheck
 npm test
+npm run qa
 npm run format
 ```
 
