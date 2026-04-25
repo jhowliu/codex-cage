@@ -92,6 +92,8 @@ Codex Cage prepares disposable Docker resources per run:
 
 The sandbox runs as the non-root `agent` user, clones the target repo into the volume, and does not bind mount the host working tree, Docker socket, SSH config, GitHub CLI config, or host ports.
 
+The publishable base image is defined in `docker/base` and published to GHCR as `ghcr.io/jhowliu/codex-cage/base:<version>`. The image contains only the orchestration tools needed by Codex Cage: Node.js/npm, pinned Codex CLI, `git`, `gh`, `curl`, `jq`, certificates, OpenSSH client, and the non-root `agent` user. Target repositories should add project-specific runtimes or build tools through their own `.codex-cage/Dockerfile`.
+
 ## Compose Services
 
 Target repos can configure Docker Compose services in `.codex-cage.yml`:
@@ -139,6 +141,7 @@ npm install
 npm run typecheck
 npm test
 npm run qa
+npm run qa:image
 npm run format
 ```
 
