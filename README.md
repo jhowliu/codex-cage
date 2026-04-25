@@ -51,6 +51,17 @@ codex-cage runs show <run-id>
 
 Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such as logs, patches, issue payloads, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
 
+## Issue Context
+
+Codex Cage supports GitHub and Linear issue URLs as normalized task context.
+
+- GitHub issue URLs infer the target repo from the URL.
+- Linear issue URLs infer the issue key from the URL, but the target repo must come from a later repo-resolution step.
+- GitHub context uses `GITHUB_TOKEN` when provided.
+- Linear context requires `LINEAR_API_KEY`.
+- Empty comments and known bot comments are filtered out.
+- The default issue context includes the last 10 human comments.
+
 ## Development
 
 ```bash
