@@ -62,6 +62,16 @@ Codex Cage supports GitHub and Linear issue URLs as normalized task context.
 - Empty comments and known bot comments are filtered out.
 - The default issue context includes the last 10 human comments.
 
+## Repository Resolution
+
+Target repositories are resolved in this order:
+
+1. Explicit `--repo`
+2. GitHub issue URL inference
+3. Current directory `git remote get-url origin`
+
+If a GitHub issue URL points at a different repo than the current directory origin, Codex Cage fails unless `--repo` is passed explicitly. GitHub operations use HTTPS token auth with `GITHUB_TOKEN`; SSH remotes are normalized to `owner/repo` and converted to token-authenticated HTTPS clone URLs internally.
+
 ## Development
 
 ```bash
