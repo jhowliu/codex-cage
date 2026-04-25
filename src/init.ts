@@ -28,7 +28,7 @@ services:
   ready: []
 
 runtime:
-  image: ghcr.io/jhowliu/codex-cage/base:0.1.0
+  image: ghcr.io/jhowliu/codex-cage/base:0.1.1
   dockerfile: null
 
 agent:
@@ -63,7 +63,7 @@ GITHUB_TOKEN=
 LINEAR_API_KEY=
 `;
 
-const dockerfile = `FROM ghcr.io/jhowliu/codex-cage/base:0.1.0
+const dockerfile = `FROM ghcr.io/jhowliu/codex-cage/base:0.1.1
 
 # Add target-repo system dependencies here.
 `;
