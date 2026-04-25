@@ -65,6 +65,7 @@ export type RunCommandOptions = {
   base?: string | undefined;
   model?: string | undefined;
   draft?: boolean | undefined;
+  noPublish?: boolean | undefined;
 };
 
 export type RunCodexCageResult = {
@@ -72,6 +73,7 @@ export type RunCodexCageResult = {
   status: "succeeded" | "failed";
   failureCode: FailureCode | null;
   prUrl: string | null;
+  noPublish?: boolean | undefined;
 };
 
 export type RunProgressEvent =
@@ -139,6 +141,7 @@ type RuntimeContext = {
   baseBranch: string;
   model: string;
   draft: boolean;
+  publish: boolean;
   runId: string;
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
@@ -402,6 +405,7 @@ async function prepareRuntimeContext(
   const baseBranch = options.base ?? configResult.config.git.base;
   const model = options.model ?? configResult.config.agent.model;
   const draft = options.draft ?? configResult.config.pr.draft;
+  const publish = options.noPublish === true ? false : configResult.config.pr.publish;
   const runId = dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
   const runtimeImage = {
@@ -425,6 +429,7 @@ async function prepareRuntimeContext(
     baseBranch,
     model,
     draft,
+    publish,
     runId,
     branchName,
     runtimeImage,
@@ -654,6 +659,47 @@ async function runImplementationLoop(input: {
 
     if (reviewResult.nextAction.action === "fail") {
       throw new RunFailureError("review_blocking", reviewResult.nextAction.feedback);
+    }
+
+    if (!input.context.publish) {
+      const finalPatch = await readCurrentDiff(input.shell);
+
+      if (finalPatch.trim() === "") {
+        throw new NoDiffError();
+      }
+
+      await writeJsonArtifact(input.store, input.context.runId, "pr.json", {
+        created: false,
+        reason: "no_publish",
+        message: "No PR was created because no-publish mode is enabled.",
+      });
+      await input.store.writeArtifact(input.context.runId, "final.patch", finalPatch);
+      await input.store.writeArtifact(
+        input.context.runId,
+        "summary.md",
+        [
+          `# ${input.context.runId}`,
+          "",
+          "No PR was created because no-publish mode is enabled.",
+          "",
+          `Final patch: ${input.store.artifactPath(input.context.runId, "final.patch")}`,
+          `Artifacts: ${input.store.runDirectory(input.context.runId)}`,
+          "",
+        ].join("\n"),
+      );
+      await input.store.updateRunStatus(input.context.runId, {
+        status: "succeeded",
+        prUrl: null,
+        finishedAt: new Date(),
+      });
+
+      return {
+        runId: input.context.runId,
+        status: "succeeded",
+        failureCode: null,
+        prUrl: null,
+        noPublish: true,
+      };
     }
 
     await input.store.updateRunStatus(input.context.runId, { status: "creating_pr" });

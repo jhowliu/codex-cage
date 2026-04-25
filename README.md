@@ -128,6 +128,8 @@ Review is read-only. If the diff changes during review, the run fails instead of
 
 Successful runs are published by the orchestrator, not by the implementation or review agents. Codex Cage rejects empty diffs, creates a run-specific branch, configures the Codex Cage git author, commits once, pushes without force, and creates a ready GitHub PR by default.
 
+Use `codex-cage run --no-publish ...`, or set `pr.publish: false`, to stop after verification, guard scanning, independent review, and final patch generation. No branch is pushed and no PR is created; the command output points to `.codex-cage/runs/<run-id>/summary.md` and `.codex-cage/runs/<run-id>/final.patch`.
+
 PR bodies include the summary, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
 
 ## Cleanup

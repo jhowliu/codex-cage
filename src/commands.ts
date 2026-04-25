@@ -46,6 +46,10 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
+    .option(
+      "--no-publish",
+      "stop after successful gates and write local artifacts without creating a PR",
+    )
     .action(
       async (
         issueArgument: string | undefined,
@@ -55,6 +59,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           base?: string;
           model?: string;
           draft?: boolean;
+          publish?: boolean;
         },
         command: Command,
       ) => {
@@ -73,6 +78,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
             base: options.base,
             model: options.model,
             draft: options.draft,
+            noPublish: options.publish === false ? true : undefined,
           }),
           {
             onProgress: (event) => {
@@ -94,6 +100,12 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
         if (result.prUrl !== null) {
           console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
+        } else if (result.status === "succeeded" && result.noPublish === true) {
+          const artifactDir = `.codex-cage/runs/${result.runId}`;
+          console.log(`${stdoutColor.label("PR")}: no PR created (no-publish mode)`);
+          console.log(`${stdoutColor.label("Artifacts")}: ${artifactDir}`);
+          console.log(`${stdoutColor.label("Patch")}: ${artifactDir}/final.patch`);
+          console.log(`${stdoutColor.label("Summary")}: ${artifactDir}/summary.md`);
         }
       },
     );

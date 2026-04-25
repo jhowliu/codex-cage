@@ -12,6 +12,7 @@ test("config schema accepts a minimal valid config", () => {
   assert.deepEqual(config.verify, ["npm test"]);
   assert.equal(config.git.base, "main");
   assert.equal(config.pr.draft, false);
+  assert.equal(config.pr.publish, true);
   assert.equal(config.issue.comments, 10);
   assert.deepEqual(config.runtime, {
     image: defaultSandboxImage,
@@ -42,6 +43,18 @@ test("config schema accepts explicit runtime image and Dockerfile", () => {
     image: "registry.example.com/codex-cage/base:custom",
     dockerfile: ".codex-cage/Dockerfile",
   });
+});
+
+test("config schema accepts disabling automatic publishing", () => {
+  const config = codexCageConfigSchema.parse({
+    verify: ["npm test"],
+    pr: {
+      publish: false,
+    },
+  });
+
+  assert.equal(config.pr.draft, false);
+  assert.equal(config.pr.publish, false);
 });
 
 test("config schema preserves unknown keys for forward compatibility", () => {

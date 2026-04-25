@@ -143,7 +143,9 @@ codex-cage run https://github.com/OWNER/REPO/issues/123
 
 GitHub issue URLs infer the target repository. If the current directory has a different GitHub origin, Codex Cage fails unless `--repo OWNER/REPO` is passed explicitly.
 
-Successful runs create one branch, one commit, one push, and one ready PR. GitHub issue PR bodies include a closing keyword such as `Closes #123`, so GitHub closes the issue only after PR merge.
+Successful runs create one branch, one commit, one push, and one ready PR by default. GitHub issue PR bodies include a closing keyword such as `Closes #123`, so GitHub closes the issue only after PR merge.
+
+For security-sensitive inspection runs, pass `--no-publish` or set `pr.publish: false` in `.codex-cage.yml`. Codex Cage still completes verification, guard scanning, independent review, and final artifact generation, then reports that no PR was created and points to `.codex-cage/runs/<run-id>/summary.md` and `.codex-cage/runs/<run-id>/final.patch`.
 
 ## Running Linear Issues
 

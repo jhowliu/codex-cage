@@ -297,6 +297,153 @@ verify:
   }
 });
 
+test("runCodexCage skips publishing in no-publish mode and keeps final artifacts", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+`);
+  const events: string[] = [];
+  const diff = `diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`;
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      ["git add --intent-to-add", commandResult(diff)],
+    ]),
+  );
+  let publishCalled = false;
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+        noPublish: true,
+      },
+      {
+        generateRunId: () => "run-no-publish",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async () => {
+          publishCalled = true;
+          throw new Error("publish should not be called in no-publish mode");
+        },
+      },
+    );
+
+    assert.deepEqual(result, {
+      runId: "run-no-publish",
+      status: "succeeded",
+      failureCode: null,
+      prUrl: null,
+      noPublish: true,
+    });
+    assert.equal(publishCalled, false);
+
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails("run-no-publish");
+    store.close();
+    const runDirectory = join(cwd, ".codex-cage", "runs", "run-no-publish");
+    const finalPatch = await readFile(join(runDirectory, "final.patch"), "utf8");
+    const summary = await readFile(join(runDirectory, "summary.md"), "utf8");
+    const pr = JSON.parse(await readFile(join(runDirectory, "pr.json"), "utf8"));
+
+    assert.equal(details.run.status, "succeeded");
+    assert.equal(details.run.prUrl, null);
+    assert.deepEqual(
+      details.phases.map((phase) => phase.name),
+      ["preflight", "cloning", "implement", "verify", "review"],
+    );
+    assert.equal(finalPatch, diff);
+    assert.match(summary, /No PR was created because no-publish mode is enabled/);
+    assert.match(summary, /final\.patch/);
+    assert.deepEqual(pr, {
+      created: false,
+      reason: "no_publish",
+      message: "No PR was created because no-publish mode is enabled.",
+    });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runCodexCage honors pr.publish false from config", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+pr:
+  publish: false
+`);
+  const diff = `diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`;
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      ["git add --intent-to-add", commandResult(diff)],
+    ]),
+  );
+  let publishCalled = false;
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-config-no-publish",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox([]),
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async () => {
+          publishCalled = true;
+          throw new Error("publish should not be called when pr.publish is false");
+        },
+      },
+    );
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.prUrl, null);
+    assert.equal(result.noPublish, true);
+    assert.equal(publishCalled, false);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runCodexCage builds configured runtime Dockerfiles before cloning", async () => {
   const cwd = await createProject(`
 verify:

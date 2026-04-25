@@ -124,6 +124,48 @@ test("run keeps the --issue option for compatibility", async () => {
   ]);
 });
 
+test("run accepts --no-publish", async () => {
+  const calls: RunCommandOptions[] = [];
+  const output: string[] = [];
+  const originalConsoleLog = console.log;
+  const program = createCli({
+    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+      calls.push(input);
+      return {
+        runId: "run-cli-no-publish",
+        status: "succeeded",
+        failureCode: null,
+        prUrl: null,
+        noPublish: true,
+      };
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = (message?: unknown) => {
+    output.push(String(message));
+  };
+
+  try {
+    await program.parseAsync(
+      ["run", "https://github.com/jhowliu/codex-cage/issues/35", "--no-publish"],
+      { from: "user" },
+    );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
+      noPublish: true,
+    },
+  ]);
+  assert.match(output.join("\n"), /PR: no PR created \(no-publish mode\)/);
+  assert.match(output.join("\n"), /\.codex-cage\/runs\/run-cli-no-publish\/final\.patch/);
+});
+
 test("runs list and show read local run metadata", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-runs-"));
 
