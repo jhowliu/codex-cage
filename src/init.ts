@@ -57,6 +57,7 @@ guards:
 `;
 
 const envExample = `# Copy this file to .codex-cage.env and fill in local secrets.
+# OPENAI_API_KEY is optional when using host Codex OAuth auth from ~/.codex/auth.json.
 OPENAI_API_KEY=
 GITHUB_TOKEN=
 # Required only for Linear issue URLs.

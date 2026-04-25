@@ -18,6 +18,12 @@ export type DockerRunOptions = {
   env?: Record<string, string>;
 };
 
+export type DockerBindMount = {
+  source: string;
+  target: string;
+  readonly: boolean;
+};
+
 export type DockerSandboxOptions = {
   runId: string;
   cloneUrl: string;
@@ -26,6 +32,7 @@ export type DockerSandboxOptions = {
   serviceNetworkName?: string;
   labels?: Record<string, string>;
   env?: Record<string, string>;
+  mounts?: DockerBindMount[];
 };
 
 export type DockerSandbox = {
@@ -113,6 +120,7 @@ export function createDockerSandbox(
   const { volumeName, networkName } = dockerResourceNames(options.runId);
   const ownedNetworkName = options.serviceNetworkName === undefined ? networkName : null;
   const agentNetworkName = options.serviceNetworkName ?? networkName;
+  const mounts = options.mounts ?? [];
   const labels = {
     [runIdLabelName]: options.runId,
     ...options.labels,
@@ -140,6 +148,7 @@ export function createDockerSandbox(
           workspacePath,
           labels,
           env: options.env ?? {},
+          mounts,
           command: `git clone ${shellQuote(options.cloneUrl)} .`,
         }),
         { env: options.env ?? {} },
@@ -154,6 +163,7 @@ export function createDockerSandbox(
           workspacePath,
           labels,
           env: options.env ?? {},
+          mounts,
           command,
         }),
         { env: options.env ?? {} },
@@ -318,6 +328,7 @@ type DockerRunArgsInput = {
   workspacePath: string;
   labels: Record<string, string>;
   env: Record<string, string>;
+  mounts?: DockerBindMount[];
   command: string;
 };
 
@@ -330,6 +341,7 @@ export function dockerRunArgs(input: DockerRunArgsInput): string[] {
     input.networkName,
     "--mount",
     `type=volume,source=${input.volumeName},target=${input.workspacePath}`,
+    ...bindMountArgs(input.mounts ?? []),
     "--workdir",
     input.workspacePath,
     "--user",
@@ -340,6 +352,18 @@ export function dockerRunArgs(input: DockerRunArgsInput): string[] {
     "-lc",
     input.command,
   ];
+}
+
+function bindMountArgs(mounts: DockerBindMount[]): string[] {
+  return mounts.flatMap((mount) => [
+    "--mount",
+    [
+      "type=bind",
+      `source=${mount.source}`,
+      `target=${mount.target}`,
+      ...(mount.readonly ? ["readonly"] : []),
+    ].join(","),
+  ]);
 }
 
 function labelArgs(labels: Record<string, string>): string[] {

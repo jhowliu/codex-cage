@@ -113,6 +113,32 @@ test("dockerRunArgs uses volume workspace and avoids host-sensitive mounts", () 
   assert.deepEqual(args.slice(-3), ["sh", "-lc", "npm test"]);
 });
 
+test("dockerRunArgs supports a single read-only Codex auth file mount", () => {
+  const args = dockerRunArgs({
+    image: defaultSandboxImage,
+    networkName: "codex-cage-run-1",
+    volumeName: "codex-cage-run-1-workspace",
+    workspacePath: "/workspace",
+    labels: { "codex-cage.run_id": "run-1" },
+    env: {},
+    mounts: [
+      {
+        source: "/Users/me/.codex/auth.json",
+        target: "/home/agent/.codex/auth.json",
+        readonly: true,
+      },
+    ],
+    command: "codex exec test",
+  });
+
+  assert.equal(
+    args.includes(
+      "type=bind,source=/Users/me/.codex/auth.json,target=/home/agent/.codex/auth.json,readonly",
+    ),
+    true,
+  );
+});
+
 test("dockerBuildArgs labels per-run runtime images", () => {
   assert.deepEqual(
     dockerBuildArgs({
