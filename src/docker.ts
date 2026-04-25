@@ -4,6 +4,16 @@ export type DockerRunner = {
   run: (args: string[], options?: DockerRunOptions) => Promise<void>;
 };
 
+export type DockerCommandRunner = {
+  run: (args: string[]) => Promise<DockerCommandResult>;
+};
+
+export type DockerCommandResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
 export type DockerRunOptions = {
   env?: Record<string, string>;
 };
@@ -36,10 +46,24 @@ export type DockerResourceNames = {
   networkName: string;
 };
 
+export type CleanupDockerOptions = {
+  all?: boolean;
+  runner?: DockerCommandRunner;
+};
+
+export type CleanupDockerReport = {
+  containers: string[];
+  networks: string[];
+  volumes: string[];
+  skippedActiveRunIds: string[];
+};
+
 export const defaultSandboxImage = "codex-cage/base:0.1.0";
 export const defaultWorkspacePath = "/workspace";
 
 const runIdLabelName = "codex-cage.run_id";
+const managedLabelName = "codex-cage.managed";
+const managedLabel = `${managedLabelName}=true`;
 
 export const execaDockerRunner: DockerRunner = {
   async run(args: string[], options: DockerRunOptions = {}): Promise<void> {
@@ -49,6 +73,18 @@ export const execaDockerRunner: DockerRunner = {
     }
 
     await execa("docker", args, { env: options.env, stdio: "inherit" });
+  },
+};
+
+export const execaDockerCommandRunner: DockerCommandRunner = {
+  async run(args: string[]): Promise<DockerCommandResult> {
+    const result = await execa("docker", args, { reject: false });
+
+    return {
+      exitCode: result.exitCode ?? 0,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
   },
 };
 
@@ -124,6 +160,60 @@ export async function cleanupDockerResources(
   await runner.run(["volume", "rm", resources.volumeName]);
 }
 
+export async function cleanupManagedDockerResources(
+  options: CleanupDockerOptions = {},
+): Promise<CleanupDockerReport> {
+  const runner = options.runner ?? execaDockerCommandRunner;
+  const all = options.all === true;
+  const containers = await listManagedContainers(runner);
+  const activeRunIds = new Set(
+    containers
+      .filter((container) => container.state === "running")
+      .map((container) => container.runId)
+      .filter((runId): runId is string => runId !== null),
+  );
+  const containersToRemove = containers
+    .filter((container) => all || container.state !== "running")
+    .map((container) => container.id);
+  const networksToRemove = (await listManagedNamedResources(runner, "network")).filter(
+    (resource) => all || resource.runId === null || !activeRunIds.has(resource.runId),
+  );
+  const volumesToRemove = (await listManagedNamedResources(runner, "volume")).filter(
+    (resource) => all || resource.runId === null || !activeRunIds.has(resource.runId),
+  );
+
+  if (containersToRemove.length > 0) {
+    await runRequiredDockerCommand(runner, [
+      "rm",
+      ...(all ? ["--force"] : []),
+      ...containersToRemove,
+    ]);
+  }
+
+  if (networksToRemove.length > 0) {
+    await runRequiredDockerCommand(runner, [
+      "network",
+      "rm",
+      ...networksToRemove.map((resource) => resource.name),
+    ]);
+  }
+
+  if (volumesToRemove.length > 0) {
+    await runRequiredDockerCommand(runner, [
+      "volume",
+      "rm",
+      ...volumesToRemove.map((resource) => resource.name),
+    ]);
+  }
+
+  return {
+    containers: containersToRemove,
+    networks: networksToRemove.map((resource) => resource.name),
+    volumes: volumesToRemove.map((resource) => resource.name),
+    skippedActiveRunIds: all ? [] : [...activeRunIds].sort(),
+  };
+}
+
 export function dockerResourceNames(runId: string): DockerResourceNames {
   const safeRunId = runId
     .toLowerCase()
@@ -186,7 +276,7 @@ export function dockerRunArgs(input: DockerRunArgsInput): string[] {
 }
 
 function labelArgs(labels: Record<string, string>): string[] {
-  return Object.entries({ "codex-cage.managed": "true", ...labels }).flatMap(
+  return Object.entries({ [managedLabelName]: "true", ...labels }).flatMap(
     ([key, value]) => ["--label", `${key}=${value}`],
   );
 }
@@ -199,4 +289,88 @@ function envArgs(env: Record<string, string>): string[] {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+type ManagedContainer = {
+  id: string;
+  state: string;
+  runId: string | null;
+};
+
+type ManagedNamedResource = {
+  name: string;
+  runId: string | null;
+};
+
+async function listManagedContainers(
+  runner: DockerCommandRunner,
+): Promise<ManagedContainer[]> {
+  const result = await runRequiredDockerCommand(runner, [
+    "ps",
+    "--all",
+    "--filter",
+    `label=${managedLabel}`,
+    "--format",
+    `{{.ID}}\t{{.State}}\t{{.Label "${runIdLabelName}"}}`,
+  ]);
+
+  return result.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const [id, state, runId] = line.split("\t");
+
+      if (id === undefined || state === undefined) {
+        throw new Error(`Unexpected docker ps output: ${line}`);
+      }
+
+      return {
+        id,
+        state,
+        runId: runId === undefined || runId === "" ? null : runId,
+      };
+    });
+}
+
+async function listManagedNamedResources(
+  runner: DockerCommandRunner,
+  resourceType: "network" | "volume",
+): Promise<ManagedNamedResource[]> {
+  const result = await runRequiredDockerCommand(runner, [
+    resourceType,
+    "ls",
+    "--filter",
+    `label=${managedLabel}`,
+    "--format",
+    `{{.Name}}\t{{.Label "${runIdLabelName}"}}`,
+  ]);
+
+  return result.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const [name, runId] = line.split("\t");
+
+      if (name === undefined) {
+        throw new Error(`Unexpected docker ${resourceType} ls output: ${line}`);
+      }
+
+      return {
+        name,
+        runId: runId === undefined || runId === "" ? null : runId,
+      };
+    });
+}
+
+async function runRequiredDockerCommand(
+  runner: DockerCommandRunner,
+  args: string[],
+): Promise<DockerCommandResult> {
+  const result = await runner.run(args);
+
+  if (result.exitCode !== 0) {
+    throw new Error(`Docker command failed: docker ${args.join(" ")}\n${result.stderr}`);
+  }
+
+  return result;
 }

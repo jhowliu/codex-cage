@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  cleanupManagedDockerResources,
   createDockerSandbox,
   dockerResourceNames,
   dockerRunArgs,
   networkCreateArgs,
   volumeCreateArgs,
+  type DockerCommandResult,
+  type DockerCommandRunner,
   type DockerRunOptions,
   type DockerRunner,
 } from "../src/docker.js";
@@ -19,6 +22,30 @@ function recordingRunner(): DockerRunner & {
     calls,
     async run(args: string[], options: DockerRunOptions = {}): Promise<void> {
       calls.push({ args, options });
+    },
+  };
+}
+
+function result(stdout = "", exitCode = 0, stderr = ""): DockerCommandResult {
+  return { exitCode, stdout, stderr };
+}
+
+function recordingCommandRunner(results: DockerCommandResult[]): DockerCommandRunner & {
+  calls: string[][];
+} {
+  const calls: string[][] = [];
+
+  return {
+    calls,
+    async run(args: string[]): Promise<DockerCommandResult> {
+      calls.push(args);
+      const next = results.shift();
+
+      if (next === undefined) {
+        throw new Error(`Unexpected docker command: docker ${args.join(" ")}`);
+      }
+
+      return next;
     },
   };
 }
@@ -153,4 +180,104 @@ test("createDockerSandbox can attach agent commands to an externally managed ser
     false,
   );
   assert.deepEqual(runner.calls[3]?.args, ["volume", "rm", "codex-cage-run-1-workspace"]);
+});
+
+test("cleanupManagedDockerResources removes stopped resources and skips active runs by default", async () => {
+  const runner = recordingCommandRunner([
+    result("active1\trunning\trun-active\nstopped1\texited\trun-stale\n"),
+    result("codex-cage-run-active\trun-active\ncodex-cage-run-stale\trun-stale\n"),
+    result(
+      "codex-cage-run-active-workspace\trun-active\ncodex-cage-run-stale-workspace\trun-stale\n",
+    ),
+    result(),
+    result(),
+    result(),
+  ]);
+
+  const report = await cleanupManagedDockerResources({ runner });
+
+  assert.deepEqual(report, {
+    containers: ["stopped1"],
+    networks: ["codex-cage-run-stale"],
+    volumes: ["codex-cage-run-stale-workspace"],
+    skippedActiveRunIds: ["run-active"],
+  });
+  assert.deepEqual(runner.calls, [
+    [
+      "ps",
+      "--all",
+      "--filter",
+      "label=codex-cage.managed=true",
+      "--format",
+      '{{.ID}}\t{{.State}}\t{{.Label "codex-cage.run_id"}}',
+    ],
+    [
+      "network",
+      "ls",
+      "--filter",
+      "label=codex-cage.managed=true",
+      "--format",
+      '{{.Name}}\t{{.Label "codex-cage.run_id"}}',
+    ],
+    [
+      "volume",
+      "ls",
+      "--filter",
+      "label=codex-cage.managed=true",
+      "--format",
+      '{{.Name}}\t{{.Label "codex-cage.run_id"}}',
+    ],
+    ["rm", "stopped1"],
+    ["network", "rm", "codex-cage-run-stale"],
+    ["volume", "rm", "codex-cage-run-stale-workspace"],
+  ]);
+});
+
+test("cleanupManagedDockerResources --all removes active managed resources explicitly", async () => {
+  const runner = recordingCommandRunner([
+    result("active1\trunning\trun-active\nstopped1\texited\trun-stale\n"),
+    result("codex-cage-run-active\trun-active\ncodex-cage-run-stale\trun-stale\n"),
+    result(
+      "codex-cage-run-active-workspace\trun-active\ncodex-cage-run-stale-workspace\trun-stale\n",
+    ),
+    result(),
+    result(),
+    result(),
+  ]);
+
+  const report = await cleanupManagedDockerResources({ all: true, runner });
+
+  assert.deepEqual(report, {
+    containers: ["active1", "stopped1"],
+    networks: ["codex-cage-run-active", "codex-cage-run-stale"],
+    volumes: ["codex-cage-run-active-workspace", "codex-cage-run-stale-workspace"],
+    skippedActiveRunIds: [],
+  });
+  assert.deepEqual(runner.calls.at(3), ["rm", "--force", "active1", "stopped1"]);
+  assert.deepEqual(runner.calls.at(4), [
+    "network",
+    "rm",
+    "codex-cage-run-active",
+    "codex-cage-run-stale",
+  ]);
+  assert.deepEqual(runner.calls.at(5), [
+    "volume",
+    "rm",
+    "codex-cage-run-active-workspace",
+    "codex-cage-run-stale-workspace",
+  ]);
+});
+
+test("cleanupManagedDockerResources reports no-op cleanup without touching artifacts", async () => {
+  const runner = recordingCommandRunner([result(), result(), result()]);
+
+  const report = await cleanupManagedDockerResources({ runner });
+
+  assert.deepEqual(report, {
+    containers: [],
+    networks: [],
+    volumes: [],
+    skippedActiveRunIds: [],
+  });
+  assert.equal(runner.calls.length, 3);
 });

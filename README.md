@@ -113,6 +113,15 @@ Successful runs are published by the orchestrator, not by the implementation or 
 
 PR bodies include the summary, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
 
+## Cleanup
+
+```bash
+codex-cage cleanup
+codex-cage cleanup --all
+```
+
+Cleanup removes Docker resources labeled as managed by Codex Cage. By default it removes stopped containers plus networks and volumes for runs without active managed containers. `--all` also removes active managed containers and their networks and volumes. Cleanup never deletes `.codex-cage/runs` artifacts or the SQLite database.
+
 ## Development
 
 ```bash
