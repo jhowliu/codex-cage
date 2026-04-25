@@ -12,9 +12,10 @@ import { openRunStore } from "../src/state.js";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(testDir, "..", "src", "cli.js");
 
-function runCli(args: string[], cwd?: string) {
+function runCli(args: string[], cwd?: string, env?: NodeJS.ProcessEnv) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
+    env: env ?? process.env,
     encoding: "utf8",
   });
 }
@@ -153,6 +154,39 @@ test("runs list and show read local run metadata", async () => {
     assert.match(showResult.stdout, /Run: run-1/);
     assert.match(showResult.stdout, /Failure: verify_failed/);
     assert.match(showResult.stdout, /Artifacts:/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runs show can emit color when forced", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-color-"));
+
+  try {
+    const store = await openRunStore(cwd);
+    await store.createRun({
+      id: "run-color",
+      issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+      issueKey: "GH-4",
+      repo: "jhowliu/codex-cage",
+      baseBranch: "main",
+      branch: "codex-cage/gh-4-run-color",
+      startedAt: new Date("2026-04-25T00:00:00.000Z"),
+    });
+    await store.updateRunStatus("run-color", {
+      status: "succeeded",
+      prUrl: "https://github.com/jhowliu/codex-cage/pull/4",
+      finishedAt: new Date("2026-04-25T00:02:00.000Z"),
+    });
+    store.close();
+
+    const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: "1" };
+    delete env.NO_COLOR;
+
+    const showResult = runCli(["runs", "show", "run-color"], cwd, env);
+    assert.equal(showResult.status, 0);
+    assert.match(showResult.stdout, /\u001B\[/);
+    assert.match(showResult.stdout, /Status/);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
