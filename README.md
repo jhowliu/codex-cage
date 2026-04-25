@@ -107,6 +107,12 @@ After implementation verification passes, Codex Cage runs a fresh Codex review p
 
 Review is read-only. If the diff changes during review, the run fails instead of publishing. Blocking findings are formatted as implementation feedback until `agent.max_review_cycles` is exhausted.
 
+## Publishing
+
+Successful runs are published by the orchestrator, not by the implementation or review agents. Codex Cage rejects empty diffs, creates a run-specific branch, configures the Codex Cage git author, commits once, pushes without force, and creates a ready GitHub PR by default.
+
+PR bodies include the summary, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
+
 ## Development
 
 ```bash
