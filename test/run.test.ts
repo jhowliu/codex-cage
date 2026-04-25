@@ -54,7 +54,6 @@ function fakeSandbox(events: string[]): DockerSandbox {
     networkName: "fake-network",
     ownedNetworkName: "fake-network",
     workspacePath: "/workspace",
-    codexAuthFilePath: null,
     async create(): Promise<void> {
       events.push("sandbox:create");
     },
@@ -72,13 +71,18 @@ function fakeSandbox(events: string[]): DockerSandbox {
 
 function shellRunner(results: Map<string, CommandResult>): ShellRunner & {
   commands: string[];
+  calls: Array<{ command: string; options: Parameters<ShellRunner["run"]>[1] }>;
 } {
   const commands: string[] = [];
+  const calls: Array<{ command: string; options: Parameters<ShellRunner["run"]>[1] }> =
+    [];
 
   return {
     commands,
-    async run(command): Promise<CommandResult> {
+    calls,
+    async run(command, options): Promise<CommandResult> {
       commands.push(command);
+      calls.push({ command, options });
 
       for (const [pattern, result] of results) {
         if (command.includes(pattern)) {
@@ -122,7 +126,7 @@ verify:
 `;
   const shell = shellRunner(
     new Map([
-      ["git fetch origin", commandResult()],
+      ["fetch origin", commandResult()],
       ["--sandbox 'workspace-write'", commandResult("implemented")],
       ["--sandbox 'read-only'", commandResult(reviewJson)],
       ["npm test", commandResult("tests passed")],
@@ -188,7 +192,7 @@ verify:
   const sandboxOptions: DockerSandboxOptions[] = [];
   const shell = shellRunner(
     new Map([
-      ["git fetch origin", commandResult()],
+      ["fetch origin", commandResult()],
       ["codex exec", commandResult("implemented")],
       ["npm test", commandResult("tests passed")],
       [
@@ -212,7 +216,11 @@ verify:
       },
       {
         generateRunId: () => "run-test-123",
-        readEnv: async () => ({ GITHUB_TOKEN: "token-value", OPENAI_API_KEY: "" }),
+        readEnv: async () => ({
+          GITHUB_TOKEN: "token-value",
+          OPENAI_API_KEY: "",
+          TARGET_APP_SECRET: "target-secret",
+        }),
         findCodexAuthFile: async () => "/host/.codex/auth.json",
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
@@ -253,11 +261,8 @@ verify:
     });
     assert.deepEqual(events, ["sandbox:create", "sandbox:clone", "sandbox:cleanup"]);
     assert.equal(sandboxOptions[0]?.image, defaultSandboxImage);
-    assert.deepEqual(sandboxOptions[0]?.env, {
-      GH_TOKEN: "token-value",
-      GITHUB_TOKEN: "token-value",
-    });
-    assert.equal(sandboxOptions[0]?.codexAuthFilePath, "/host/.codex/auth.json");
+    assert.equal("env" in (sandboxOptions[0] ?? {}), false);
+    assert.equal("codexAuthFilePath" in (sandboxOptions[0] ?? {}), false);
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
 
@@ -286,11 +291,145 @@ verify:
       shell.commands.find((command) => command.includes("codex exec")) ?? "",
       /--sandbox 'workspace-write'/,
     );
+    assert.deepEqual(
+      shell.calls.find((call) => call.command.includes("codex exec"))?.options,
+      {
+        env: {},
+        codexAuthFilePath: "/host/.codex/auth.json",
+      },
+    );
+    assert.deepEqual(shell.calls.find((call) => call.command === "npm test")?.options, {
+      env: { TARGET_APP_SECRET: "target-secret" },
+    });
     assert.match(promptContext, /AGENTS\.md/);
     assert.match(instructions, /Always write focused tests/);
     assert.deepEqual(
       details.phases.map((phase) => phase.name),
       ["preflight", "cloning", "implement", "verify", "review", "pr"],
+    );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runCodexCage scopes credentials for setup, verify, Codex, review, and publish", async () => {
+  const cwd = await createProject(`
+setup:
+  - npm install
+verify:
+  - npm test
+`);
+  const events: string[] = [];
+  const diff = `diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`;
+  const reviewJson = JSON.stringify({
+    decision: "pass",
+    summary: "No blocking issues.",
+    findings: [],
+  });
+  const shell = shellRunner(
+    new Map([
+      ["fetch origin", commandResult()],
+      ["npm install", commandResult("setup passed")],
+      ["--sandbox 'workspace-write'", commandResult("implemented")],
+      ["--sandbox 'read-only'", commandResult(reviewJson)],
+      ["npm test", commandResult("tests passed")],
+      ["git add --intent-to-add", commandResult(diff)],
+      ["'status'", commandResult(" M src/app.ts")],
+      [
+        "'gh' 'pr' 'create'",
+        commandResult("https://github.com/jhowliu/codex-cage/pull/26"),
+      ],
+    ]),
+  );
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-credential-scope",
+        readEnv: async () => ({
+          GITHUB_TOKEN: "github-token",
+          GH_TOKEN: "gh-token",
+          OPENAI_API_KEY: "openai-token",
+          TARGET_APP_SECRET: "target-secret",
+        }),
+        findCodexAuthFile: async () => "/host/.codex/auth.json",
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:github-token@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+        publishSuccessfulRun: async (input) => {
+          await input.git?.run(["status", "--porcelain"]);
+          await input.gh?.run(["pr", "create"]);
+          return {
+            branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+            commitMessage: "#26 Wire run command",
+            prTitle: "#26 Wire run command",
+            prBody: "body",
+            prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+          };
+        },
+      },
+    );
+
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(
+      shell.calls.find((call) => call.command === "npm install")?.options,
+      {
+        env: { TARGET_APP_SECRET: "target-secret" },
+      },
+    );
+    assert.deepEqual(shell.calls.find((call) => call.command === "npm test")?.options, {
+      env: { TARGET_APP_SECRET: "target-secret" },
+    });
+    assert.deepEqual(
+      shell.calls.find((call) => call.command.includes("--sandbox 'workspace-write'"))
+        ?.options,
+      {
+        env: {
+          OPENAI_API_KEY: "openai-token",
+        },
+      },
+    );
+    assert.deepEqual(
+      shell.calls.find((call) => call.command.includes("--sandbox 'read-only'"))?.options,
+      {
+        env: {
+          OPENAI_API_KEY: "openai-token",
+        },
+      },
+    );
+    assert.deepEqual(
+      shell.calls.find((call) => call.command.includes("'status'"))?.options,
+      {
+        env: {
+          GITHUB_TOKEN: "github-token",
+          GH_TOKEN: "gh-token",
+        },
+      },
+    );
+    assert.deepEqual(
+      shell.calls.find((call) => call.command.includes("'gh' 'pr' 'create'"))?.options,
+      {
+        env: {
+          GITHUB_TOKEN: "github-token",
+          GH_TOKEN: "gh-token",
+        },
+      },
     );
   } finally {
     await rm(cwd, { recursive: true, force: true });
@@ -309,7 +448,7 @@ runtime:
   const sandboxOptions: DockerSandboxOptions[] = [];
   const shell = shellRunner(
     new Map([
-      ["git fetch origin", commandResult()],
+      ["fetch origin", commandResult()],
       ["codex exec", commandResult("implemented")],
       ["npm test", commandResult("tests passed")],
       [
@@ -462,7 +601,7 @@ agent:
   const events: string[] = [];
   const shell = shellRunner(
     new Map([
-      ["git fetch origin", commandResult()],
+      ["fetch origin", commandResult()],
       ["codex exec", commandResult("implemented")],
       ["npm test", commandResult("", 1, "tests failed")],
     ]),

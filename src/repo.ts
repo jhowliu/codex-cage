@@ -100,12 +100,10 @@ export function createAuthenticatedRepo(
     );
   }
 
-  const encodedToken = encodeURIComponent(githubToken);
-
   return {
     repo,
-    cloneUrl: `https://x-access-token:${encodedToken}@github.com/${repo.fullName}.git`,
-    redactedCloneUrl: `https://x-access-token:[REDACTED]@github.com/${repo.fullName}.git`,
+    cloneUrl: `https://github.com/${repo.fullName}.git`,
+    redactedCloneUrl: `https://github.com/${repo.fullName}.git`,
   };
 }
 

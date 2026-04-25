@@ -25,6 +25,9 @@ export type DockerSandboxOptions = {
   workspacePath?: string;
   serviceNetworkName?: string;
   labels?: Record<string, string>;
+};
+
+export type DockerSandboxCommandOptions = {
   env?: Record<string, string>;
   codexAuthFilePath?: string | undefined;
 };
@@ -36,10 +39,9 @@ export type DockerSandbox = {
   networkName: string;
   ownedNetworkName: string | null;
   workspacePath: string;
-  codexAuthFilePath: string | null;
   create(): Promise<void>;
-  cloneRepository(): Promise<void>;
-  runCommand(command: string): Promise<void>;
+  cloneRepository(options?: DockerSandboxCommandOptions): Promise<void>;
+  runCommand(command: string, options?: DockerSandboxCommandOptions): Promise<void>;
   cleanup(): Promise<void>;
 };
 
@@ -127,14 +129,17 @@ export function createDockerSandbox(
     networkName: agentNetworkName,
     ownedNetworkName,
     workspacePath,
-    codexAuthFilePath: options.codexAuthFilePath ?? null,
     async create(): Promise<void> {
       await runner.run(volumeCreateArgs(volumeName, labels));
       if (ownedNetworkName !== null) {
         await runner.run(networkCreateArgs(ownedNetworkName, labels));
       }
     },
-    async cloneRepository(): Promise<void> {
+    async cloneRepository(
+      commandOptions: DockerSandboxCommandOptions = {},
+    ): Promise<void> {
+      const env = commandOptions.env ?? {};
+      const cloneUrl = publicCloneUrl(options.cloneUrl);
       await runner.run(
         dockerRunArgs({
           image,
@@ -142,14 +147,18 @@ export function createDockerSandbox(
           volumeName,
           workspacePath,
           labels,
-          env: options.env ?? {},
-          codexAuthFilePath: options.codexAuthFilePath,
-          command: `git clone ${shellQuote(options.cloneUrl)} .`,
+          env,
+          codexAuthFilePath: commandOptions.codexAuthFilePath,
+          command: gitCloneCommand(cloneUrl, env),
         }),
-        { env: options.env ?? {} },
+        { env },
       );
     },
-    async runCommand(command: string): Promise<void> {
+    async runCommand(
+      command: string,
+      commandOptions: DockerSandboxCommandOptions = {},
+    ): Promise<void> {
+      const env = commandOptions.env ?? {};
       await runner.run(
         dockerRunArgs({
           image,
@@ -157,11 +166,11 @@ export function createDockerSandbox(
           volumeName,
           workspacePath,
           labels,
-          env: options.env ?? {},
-          codexAuthFilePath: options.codexAuthFilePath,
+          env,
+          codexAuthFilePath: commandOptions.codexAuthFilePath,
           command,
         }),
-        { env: options.env ?? {} },
+        { env },
       );
     },
     async cleanup(): Promise<void> {
@@ -391,6 +400,38 @@ function envArgs(env: Record<string, string>): string[] {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function gitCloneCommand(cloneUrl: string, env: Record<string, string>): string {
+  const git = githubAuthenticatedGit(env);
+
+  return `${git} clone ${shellQuote(cloneUrl)} . && git remote set-url origin ${shellQuote(
+    cloneUrl,
+  )}`;
+}
+
+function githubAuthenticatedGit(env: Record<string, string>): string {
+  if (env.GITHUB_TOKEN === undefined) {
+    return "git";
+  }
+
+  return 'git -c "http.https://github.com/.extraheader=AUTHORIZATION: bearer ${GITHUB_TOKEN}"';
+}
+
+function publicCloneUrl(cloneUrl: string): string {
+  try {
+    const url = new URL(cloneUrl);
+
+    if (url.hostname !== "github.com") {
+      return cloneUrl;
+    }
+
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return cloneUrl;
+  }
 }
 
 type ManagedContainer = {

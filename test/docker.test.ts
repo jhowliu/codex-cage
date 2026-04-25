@@ -197,16 +197,13 @@ test("createDockerSandbox creates resources, clones into volume, runs commands, 
     {
       runId: "run-1",
       cloneUrl: "https://x-access-token:token@github.com/jhowliu/codex-cage.git",
-      env: {
-        GITHUB_TOKEN: "token",
-      },
     },
     runner,
   );
 
   await sandbox.create();
-  await sandbox.cloneRepository();
-  await sandbox.runCommand("npm test");
+  await sandbox.cloneRepository({ env: { GITHUB_TOKEN: "token" } });
+  await sandbox.runCommand("npm test", { env: { NODE_ENV: "test" } });
   await sandbox.cleanup();
 
   assert.equal(sandbox.volumeName, "codex-cage-run-1-workspace");
@@ -216,14 +213,48 @@ test("createDockerSandbox creates resources, clones into volume, runs commands, 
   assert.deepEqual(runner.calls[0]?.args.slice(0, 2), ["volume", "create"]);
   assert.deepEqual(runner.calls[1]?.args.slice(0, 2), ["network", "create"]);
   assert.equal(
-    runner.calls[2]?.args.some((arg) => arg.includes("git clone")),
+    runner.calls[2]?.args.some((arg) => arg.includes("clone")),
+    true,
+  );
+  assert.equal(runner.calls[2]?.args.join(" ").includes("x-access-token:token"), false);
+  assert.equal(
+    runner.calls[2]?.args.join(" ").includes("https://github.com/jhowliu/codex-cage.git"),
     true,
   );
   assert.equal(runner.calls[3]?.args.at(-1), "npm test");
   assert.deepEqual(runner.calls[2]?.options.env, { GITHUB_TOKEN: "token" });
-  assert.deepEqual(runner.calls[3]?.options.env, { GITHUB_TOKEN: "token" });
+  assert.deepEqual(runner.calls[3]?.options.env, { NODE_ENV: "test" });
   assert.deepEqual(runner.calls[4]?.args, ["network", "rm", "codex-cage-run-1"]);
   assert.deepEqual(runner.calls[5]?.args, ["volume", "rm", "codex-cage-run-1-workspace"]);
+});
+
+test("createDockerSandbox keeps Codex auth command-scoped", async () => {
+  const runner = recordingRunner();
+  const sandbox = createDockerSandbox(
+    {
+      runId: "run-1",
+      cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+    },
+    runner,
+  );
+
+  await sandbox.cloneRepository();
+  await sandbox.runCommand("npm test");
+  await sandbox.runCommand("codex exec hello", {
+    env: { OPENAI_API_KEY: "openai" },
+    codexAuthFilePath: "/Users/example/.codex/auth.json",
+  });
+
+  const setupArgs = runner.calls[1]?.args ?? [];
+  const codexArgs = runner.calls[2]?.args ?? [];
+
+  assert.equal(setupArgs.join(" ").includes("codex-auth.json"), false);
+  assert.equal(setupArgs.includes("GITHUB_TOKEN"), false);
+  assert.equal(setupArgs.includes("GH_TOKEN"), false);
+  assert.equal(setupArgs.includes("OPENAI_API_KEY"), false);
+  assert.equal(codexArgs.join(" ").includes("/Users/example/.codex/auth.json"), true);
+  assert.deepEqual(runner.calls[1]?.options.env, {});
+  assert.deepEqual(runner.calls[2]?.options.env, { OPENAI_API_KEY: "openai" });
 });
 
 test("createDockerSandbox can attach agent commands to an externally managed service network", async () => {
