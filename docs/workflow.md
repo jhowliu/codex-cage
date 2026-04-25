@@ -1,8 +1,8 @@
-# Codex Cage MVP Workflow
+# Codex Cage Workflow
 
 Codex Cage runs issue-driven Codex work in Docker-owned workspaces. The CLI is built as a set of small orchestration slices: config/init, issue context, repo auth, Docker sandboxing, Compose services, guards, review, publishing, and cleanup.
 
-The `run` command is currently routed in the CLI but not wired into one end-to-end orchestrator yet. The command examples below define the intended MVP interface and are covered by local fake-integration QA so the flow can be validated without real Codex or GitHub calls.
+The `run` command is currently routed in the CLI but not wired into one end-to-end orchestrator yet. The command examples below define the intended interface and are covered by local fake-integration QA so the flow can be validated without real Codex or GitHub calls.
 
 ## Install
 
@@ -47,7 +47,7 @@ Required repository permissions:
 - **Pull requests: Read and write** for PR creation.
 - **Metadata: Read-only** is required by GitHub for repository access.
 
-No organization-wide token is required for the MVP.
+No organization-wide token is required.
 
 ## Initialize A Target Repo
 
@@ -112,7 +112,7 @@ guards:
 
 ## Running GitHub Issues
 
-Intended MVP command shape:
+Intended command shape:
 
 ```bash
 codex-cage run --issue https://github.com/OWNER/REPO/issues/123
@@ -124,7 +124,7 @@ Successful runs create one branch, one commit, one push, and one ready PR. GitHu
 
 ## Running Linear Issues
 
-Intended MVP command shape:
+Intended command shape:
 
 ```bash
 codex-cage run --issue https://linear.app/ORG/issue/ENG-123/title --repo OWNER/REPO
@@ -153,7 +153,7 @@ Non-goals:
 - Codex Cage is not a general untrusted-code sandbox.
 - Codex Cage does not guarantee protection against Docker daemon or kernel vulnerabilities.
 - Codex Cage does not manage cloud IAM or external secret rotation.
-- Codex Cage does not update Linear issues in the MVP.
+- Codex Cage does not update Linear issues.
 
 ## Cleanup
 
@@ -177,7 +177,7 @@ npm run qa
 npm run format
 ```
 
-`npm run qa` executes a fake integration harness for the main MVP outcomes:
+`npm run qa` executes a fake integration harness for the main outcomes:
 
 - success
 - verify failure

@@ -45,7 +45,7 @@ const issue: IssueContext = {
   url: "https://github.com/jhowliu/codex-cage/issues/13",
   identifier: "#13",
   title: "Docs and QA",
-  body: "Document the MVP workflow and add QA coverage.",
+  body: "Document the workflow and add QA coverage.",
   comments: [],
   inferredRepo: "jhowliu/codex-cage",
 };
