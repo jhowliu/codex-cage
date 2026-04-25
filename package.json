@@ -1,0 +1,35 @@
+{
+  "name": "codex-cage",
+  "version": "0.1.0",
+  "description": "Run Codex in an isolated Docker workspace and publish verified PRs from issue links.",
+  "type": "module",
+  "bin": {
+    "codex-cage": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "lint": "npm run typecheck",
+    "format": "prettier --check ."
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "execa": "^9.5.2",
+    "sql.js": "^1.12.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "@types/sql.js": "^1.4.9",
+    "prettier": "^3.5.1",
+    "typescript": "^5.7.3"
+  }
+}
