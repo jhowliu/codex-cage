@@ -26,13 +26,14 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--dockerfile", "also create .codex-cage/Dockerfile")
     .action(async (options: { dockerfile?: boolean }) => {
       const result = await initProject(process.cwd(), options);
+      const color = createColorizer(process.stdout);
 
       for (const path of result.created) {
-        console.log(`created ${path}`);
+        console.log(`${color.success("created")} ${color.info(path)}`);
       }
 
       for (const path of result.updated) {
-        console.log(`updated ${path}`);
+        console.log(`${color.warning("updated")} ${color.info(path)}`);
       }
     });
 
@@ -58,6 +59,8 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         command: Command,
       ) => {
         const issueUrl = options.issue ?? issueArgument;
+        const stdoutColor = createColorizer(process.stdout);
+        const stderrColor = createColorizer(process.stderr);
 
         if (issueUrl === undefined) {
           command.error("error: missing required issue URL");
@@ -73,20 +76,24 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           }),
           {
             onProgress: (event) => {
-              console.error(formatRunProgressEvent(event));
+              console.error(formatRunProgressEvent(event, stderrColor));
             },
           },
         );
 
-        console.log(`Run: ${result.runId}`);
-        console.log(`Status: ${result.status}`);
+        console.log(`${stdoutColor.label("Run")}: ${stdoutColor.info(result.runId)}`);
+        console.log(
+          `${stdoutColor.label("Status")}: ${stdoutColor.status(result.status)}`,
+        );
 
         if (result.failureCode !== null) {
-          console.log(`Failure: ${result.failureCode}`);
+          console.log(
+            `${stdoutColor.label("Failure")}: ${stdoutColor.failure(result.failureCode)}`,
+          );
         }
 
         if (result.prUrl !== null) {
-          console.log(`PR: ${result.prUrl}`);
+          console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
         }
       },
     );
@@ -98,22 +105,23 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .description("List known runs from local metadata.")
     .action(async () => {
       const store = await openRunStore(process.cwd());
+      const color = createColorizer(process.stdout);
 
       try {
         const runs = store.listRuns();
 
         if (runs.length === 0) {
-          console.log("No runs found.");
+          console.log(color.muted("No runs found."));
           return;
         }
 
         for (const run of runs) {
           const details = [
-            run.id,
+            color.info(run.id),
             run.issueKey,
-            run.status,
-            run.failureCode ?? "-",
-            run.prUrl ?? "-",
+            color.status(run.status),
+            run.failureCode === null ? "-" : color.failure(run.failureCode),
+            run.prUrl === null ? "-" : color.link(run.prUrl),
           ];
 
           console.log(details.join("  "));
@@ -129,38 +137,47 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .argument("<run-id>", "run id")
     .action(async (runId: string) => {
       const store = await openRunStore(process.cwd());
+      const color = createColorizer(process.stdout);
 
       try {
         const details = store.getRunDetails(runId);
 
-        console.log(`Run: ${details.run.id}`);
-        console.log(`Status: ${details.run.status}`);
-        console.log(`Failure: ${details.run.failureCode ?? "-"}`);
-        console.log(`Issue: ${details.run.issueKey}`);
-        console.log(`Repo: ${details.run.repo}`);
-        console.log(`Base: ${details.run.baseBranch}`);
-        console.log(`Branch: ${details.run.branch}`);
+        console.log(`${color.label("Run")}: ${color.info(details.run.id)}`);
+        console.log(`${color.label("Status")}: ${color.status(details.run.status)}`);
+        console.log(
+          `${color.label("Failure")}: ${
+            details.run.failureCode === null
+              ? "-"
+              : color.failure(details.run.failureCode)
+          }`,
+        );
+        console.log(`${color.label("Issue")}: ${details.run.issueKey}`);
+        console.log(`${color.label("Repo")}: ${details.run.repo}`);
+        console.log(`${color.label("Base")}: ${details.run.baseBranch}`);
+        console.log(`${color.label("Branch")}: ${color.info(details.run.branch)}`);
 
         if (details.run.prUrl !== null) {
-          console.log(`PR: ${details.run.prUrl}`);
+          console.log(`${color.label("PR")}: ${color.link(details.run.prUrl)}`);
         }
 
         console.log("");
-        console.log("Phases:");
+        console.log(color.heading("Phases:"));
 
         if (details.phases.length === 0) {
           console.log("  none");
         } else {
           for (const phase of details.phases) {
-            console.log(`  ${phase.name}  ${phase.status}  ${phase.logPath ?? "-"}`);
+            console.log(
+              `  ${phase.name}  ${color.status(phase.status)}  ${phase.logPath ?? "-"}`,
+            );
           }
         }
 
         console.log("");
-        console.log("Artifacts:");
+        console.log(color.heading("Artifacts:"));
 
         for (const [name, path] of Object.entries(details.artifacts)) {
-          console.log(`  ${name}: ${path}`);
+          console.log(`  ${color.label(name)}: ${path}`);
         }
       } finally {
         store.close();
@@ -173,34 +190,43 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--all", "remove all managed Docker resources, including active ones")
     .action(async (options: { all?: boolean }) => {
       const report = await cleanupManagedDockerResources({ all: options.all === true });
-      console.log(formatCleanupReport(report));
+      console.log(formatCleanupReport(report, createColorizer(process.stdout)));
     });
 
   return program;
 }
 
-function formatRunProgressEvent(event: RunProgressEvent): string {
+function formatRunProgressEvent(
+  event: RunProgressEvent,
+  color: Colorizer = createColorizer(process.stderr),
+): string {
   switch (event.type) {
     case "run_started":
       return [
-        `Run ${event.runId}`,
-        `Issue: ${event.issueKey} ${event.issueTitle}`,
-        `Repo: ${event.repo}`,
-        `Branch: ${event.branch}`,
-        `Artifacts: ${event.artifactDir}`,
+        `${color.heading("Run")} ${color.info(event.runId)}`,
+        `${color.label("Issue")}: ${event.issueKey} ${event.issueTitle}`,
+        `${color.label("Repo")}: ${event.repo}`,
+        `${color.label("Branch")}: ${color.info(event.branch)}`,
+        `${color.label("Artifacts")}: ${event.artifactDir}`,
       ].join("\n");
     case "iteration_started":
-      return `[iteration ${event.iteration}/${event.maxIterations}] implementing`;
+      return `${color.warning(
+        `[iteration ${event.iteration}/${event.maxIterations}]`,
+      )} implementing`;
     case "phase_started":
-      return `[${event.phase}] started`;
+      return `${color.info(`[${event.phase}]`)} started`;
     case "phase_passed":
-      return `[${event.phase}] passed (${event.logPath})`;
+      return `${color.success(`[${event.phase}] passed`)} (${event.logPath})`;
     case "phase_failed":
-      return `[${event.phase}] failed (${event.logPath})`;
+      return `${color.failure(`[${event.phase}] failed`)} (${event.logPath})`;
     case "run_finished":
       return event.status === "succeeded"
-        ? `Run ${event.runId} succeeded${event.prUrl === null ? "" : `: ${event.prUrl}`}`
-        : `Run ${event.runId} failed: ${event.failureCode ?? "unknown"}`;
+        ? `${color.heading("Run")} ${color.info(event.runId)} ${color.success(
+            "succeeded",
+          )}${event.prUrl === null ? "" : `: ${color.link(event.prUrl)}`}`
+        : `${color.heading("Run")} ${color.info(event.runId)} ${color.failure(
+            "failed",
+          )}: ${color.failure(event.failureCode ?? "unknown")}`;
   }
 }
 
@@ -212,16 +238,29 @@ function removeUndefinedProperties<TValue extends Record<string, unknown>>(
   ) as TValue;
 }
 
-function formatCleanupReport(report: CleanupDockerReport): string {
+function formatCleanupReport(
+  report: CleanupDockerReport,
+  color: Colorizer = createColorizer(process.stdout),
+): string {
   const lines = [
-    `Removed containers: ${formatRemovedResources(report.containers)}`,
-    `Removed images: ${formatRemovedResources(report.images)}`,
-    `Removed networks: ${formatRemovedResources(report.networks)}`,
-    `Removed volumes: ${formatRemovedResources(report.volumes)}`,
+    `${color.label("Removed containers")}: ${formatRemovedResources(
+      report.containers,
+      color,
+    )}`,
+    `${color.label("Removed images")}: ${formatRemovedResources(report.images, color)}`,
+    `${color.label("Removed networks")}: ${formatRemovedResources(
+      report.networks,
+      color,
+    )}`,
+    `${color.label("Removed volumes")}: ${formatRemovedResources(report.volumes, color)}`,
   ];
 
   if (report.skippedActiveRunIds.length > 0) {
-    lines.push(`Skipped active runs: ${report.skippedActiveRunIds.join(", ")}`);
+    lines.push(
+      `${color.label("Skipped active runs")}: ${report.skippedActiveRunIds
+        .map((runId) => color.warning(runId))
+        .join(", ")}`,
+    );
   }
 
   if (
@@ -230,12 +269,87 @@ function formatCleanupReport(report: CleanupDockerReport): string {
     report.networks.length === 0 &&
     report.volumes.length === 0
   ) {
-    lines.push("No managed Docker resources removed.");
+    lines.push(color.muted("No managed Docker resources removed."));
   }
 
   return lines.join("\n");
 }
 
-function formatRemovedResources(resources: string[]): string {
-  return resources.length === 0 ? "none" : resources.join(", ");
+function formatRemovedResources(resources: string[], color: Colorizer): string {
+  return resources.length === 0
+    ? color.muted("none")
+    : resources.map((resource) => color.info(resource)).join(", ");
+}
+
+type Colorizer = {
+  heading: (value: string) => string;
+  label: (value: string) => string;
+  info: (value: string) => string;
+  link: (value: string) => string;
+  success: (value: string) => string;
+  warning: (value: string) => string;
+  failure: (value: string) => string;
+  muted: (value: string) => string;
+  status: (value: string) => string;
+};
+
+function createColorizer(stream: NodeJS.WriteStream): Colorizer {
+  const enabled = colorEnabled(stream);
+  const style = (code: string, value: string): string =>
+    enabled ? `\u001B[${code}m${value}\u001B[0m` : value;
+
+  return {
+    heading: (value) => style("1", value),
+    label: (value) => style("36", value),
+    info: (value) => style("36", value),
+    link: (value) => style("4;36", value),
+    success: (value) => style("32", value),
+    warning: (value) => style("33", value),
+    failure: (value) => style("31", value),
+    muted: (value) => style("2", value),
+    status: (value) => {
+      if (value === "succeeded" || value === "passed") {
+        return style("32", value);
+      }
+
+      if (
+        value === "failed" ||
+        value === "guard_failed" ||
+        value === "verify_failed" ||
+        value === "review_blocking" ||
+        value === "internal_error"
+      ) {
+        return style("31", value);
+      }
+
+      if (
+        value === "running" ||
+        value === "setup" ||
+        value === "implementing" ||
+        value === "verifying" ||
+        value === "reviewing" ||
+        value === "creating_pr"
+      ) {
+        return style("33", value);
+      }
+
+      return value;
+    },
+  };
+}
+
+function colorEnabled(stream: NodeJS.WriteStream): boolean {
+  if (process.env.NO_COLOR !== undefined || process.env.TERM === "dumb") {
+    return false;
+  }
+
+  if (
+    process.env.FORCE_COLOR !== undefined &&
+    process.env.FORCE_COLOR !== "" &&
+    process.env.FORCE_COLOR !== "0"
+  ) {
+    return true;
+  }
+
+  return stream.isTTY === true;
 }
