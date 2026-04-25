@@ -1,16 +1,9 @@
 import { Command } from "commander";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { initProject } from "./init.js";
+import { runCodexCage } from "./run.js";
 import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
-
-type CommandHandler = () => Promise<void> | void;
-
-const notImplemented =
-  (commandName: string): CommandHandler =>
-  () => {
-    throw new Error(`${commandName} is not implemented yet.`);
-  };
 
 export function createCli(): Command {
   const program = new Command();
@@ -46,7 +39,36 @@ export function createCli(): Command {
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
-    .action(notImplemented("run"));
+    .action(
+      async (options: {
+        issue: string;
+        repo?: string;
+        base?: string;
+        model?: string;
+        draft?: boolean;
+      }) => {
+        const result = await runCodexCage(
+          removeUndefinedProperties({
+            issueUrl: options.issue,
+            repo: options.repo,
+            base: options.base,
+            model: options.model,
+            draft: options.draft,
+          }),
+        );
+
+        console.log(`Run: ${result.runId}`);
+        console.log(`Status: ${result.status}`);
+
+        if (result.failureCode !== null) {
+          console.log(`Failure: ${result.failureCode}`);
+        }
+
+        if (result.prUrl !== null) {
+          console.log(`PR: ${result.prUrl}`);
+        }
+      },
+    );
 
   const runs = program.command("runs").description("Inspect prior Codex Cage runs.");
 
@@ -134,6 +156,14 @@ export function createCli(): Command {
     });
 
   return program;
+}
+
+function removeUndefinedProperties<TValue extends Record<string, unknown>>(
+  value: TValue,
+): TValue {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as TValue;
 }
 
 function formatCleanupReport(report: CleanupDockerReport): string {
