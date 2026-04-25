@@ -97,7 +97,7 @@ The sandbox runs as the non-root `agent` user, clones the target repo into the v
 
 The publishable base image is defined in `docker/base` and published to GHCR as `ghcr.io/jhowliu/codex-cage/base:<version>`. The image contains only the orchestration tools needed by Codex Cage: Node.js/npm, pinned Codex CLI, `git`, `gh`, `curl`, `jq`, certificates, OpenSSH client, and the non-root `agent` user. Target repositories should add project-specific runtimes or build tools through their own `.codex-cage/Dockerfile`.
 
-Runtime images are configured in `.codex-cage.yml`. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image from that Dockerfile using `.codex-cage/` as the build context before cloning the target repository. If no Dockerfile is configured, Codex Cage uses `runtime.image`.
+Runtime images are configured in `.codex-cage.yml`. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image from that Dockerfile using `.codex-cage/` as the build context before cloning the target repository. If no Dockerfile is configured, Codex Cage uses `runtime.image`. Custom runtime images are trusted code: they define the environment that runs agent commands and should be reviewed and pinned like other supply-chain inputs. Codex Cage warns when `runtime.image` uses `latest` or omits both a tag and digest, but it still allows arbitrary image references.
 
 ## Compose Services
 

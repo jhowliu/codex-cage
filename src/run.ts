@@ -9,7 +9,11 @@ import {
   hasComposeServices,
   type ComposeProject,
 } from "./compose.js";
-import { parseCodexCageConfig, type CodexCageConfig } from "./config.js";
+import {
+  parseCodexCageConfig,
+  type CodexCageConfig,
+  type RuntimeImageWarning,
+} from "./config.js";
 import {
   buildRuntimeImage,
   createDockerSandbox,
@@ -85,6 +89,11 @@ export type RunProgressEvent =
       artifactDir: string;
     }
   | {
+      type: "warning";
+      runId: string;
+      message: string;
+    }
+  | {
       type: "phase_started" | "phase_passed" | "phase_failed";
       runId: string;
       phase: PhaseName;
@@ -132,6 +141,7 @@ type RuntimeContext = {
   cwd: string;
   config: CodexCageConfig;
   configWarnings: string[];
+  runtimeImageWarnings: RuntimeImageWarning[];
   secrets: Record<string, string>;
   issue: IssueContext;
   repoResolution: RepoResolution;
@@ -141,7 +151,10 @@ type RuntimeContext = {
   draft: boolean;
   runId: string;
   branchName: string;
-  runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
+  runtimeImage: RuntimeImageBuildResult & {
+    source: "configured" | "built";
+    warnings: RuntimeImageWarning[];
+  };
   promptContext: PromptContext;
   codexAuthFilePath: string | null;
 };
@@ -188,11 +201,19 @@ export async function runCodexCage(
       branch: context.branchName,
       artifactDir: store.runDirectory(context.runId),
     });
+    for (const warning of context.configWarnings) {
+      onProgress({
+        type: "warning",
+        runId: context.runId,
+        message: warning,
+      });
+    }
     await writeJsonArtifact(store, context.runId, "issue.json", context.issue);
     await writePromptContextArtifacts(store, context);
     await writeJsonArtifact(store, context.runId, "resolved-config.json", {
       config: context.config,
       warnings: context.configWarnings,
+      runtimeImageWarnings: context.runtimeImageWarnings,
       repoSource: context.repoResolution.source,
       runtimeImage: context.runtimeImage,
     });
@@ -228,7 +249,7 @@ export async function runCodexCage(
                 `Dockerfile: ${result.dockerfilePath}`,
                 `Build context: ${result.contextPath}`,
               ].join("\n"),
-              value: { ...result, source: "built" as const },
+              value: { ...result, source: "built" as const, warnings: [] },
             };
           },
         );
@@ -409,6 +430,7 @@ async function prepareRuntimeContext(
     dockerfilePath: "",
     contextPath: "",
     source: "configured" as const,
+    warnings: configResult.runtimeImageWarnings,
   };
   const promptContext = await buildPromptContext(cwd);
   const codexAuthFilePath =
@@ -418,6 +440,7 @@ async function prepareRuntimeContext(
     cwd,
     config: configResult.config,
     configWarnings: configResult.warnings,
+    runtimeImageWarnings: configResult.runtimeImageWarnings,
     secrets,
     issue,
     repoResolution,
@@ -436,6 +459,7 @@ async function prepareRuntimeContext(
 async function readConfig(cwd: string): Promise<{
   config: CodexCageConfig;
   warnings: string[];
+  runtimeImageWarnings: RuntimeImageWarning[];
 }> {
   let content: string;
 

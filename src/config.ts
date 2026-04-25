@@ -62,9 +62,16 @@ export const codexCageConfigSchema = z
 
 export type CodexCageConfig = z.infer<typeof codexCageConfigSchema>;
 
+export type RuntimeImageWarning = {
+  code: "runtime_image_latest_tag" | "runtime_image_missing_tag_or_digest";
+  image: string;
+  message: string;
+};
+
 export type ConfigParseResult = {
   config: CodexCageConfig;
   warnings: string[];
+  runtimeImageWarnings: RuntimeImageWarning[];
 };
 
 const knownTopLevelKeys = new Set([
@@ -81,11 +88,16 @@ const knownTopLevelKeys = new Set([
 ]);
 
 export function parseCodexCageConfig(input: unknown): ConfigParseResult {
-  const warnings = collectUnknownTopLevelKeyWarnings(input);
+  const config = codexCageConfigSchema.parse(input);
+  const runtimeImageWarnings = collectRuntimeImageWarnings(config);
 
   return {
-    config: codexCageConfigSchema.parse(input),
-    warnings,
+    config,
+    runtimeImageWarnings,
+    warnings: [
+      ...collectUnknownTopLevelKeyWarnings(input),
+      ...runtimeImageWarnings.map((warning) => warning.message),
+    ],
   };
 }
 
@@ -97,4 +109,56 @@ function collectUnknownTopLevelKeyWarnings(input: unknown): string[] {
   return Object.keys(input)
     .filter((key) => !knownTopLevelKeys.has(key))
     .map((key) => `Unknown config key "${key}" is not used by this version.`);
+}
+
+function collectRuntimeImageWarnings(config: CodexCageConfig): RuntimeImageWarning[] {
+  if (config.runtime.dockerfile !== null) {
+    return [];
+  }
+
+  const reference = parseDockerImageReference(config.runtime.image);
+
+  if (reference.digest !== null) {
+    return [];
+  }
+
+  if (reference.tag === null) {
+    return [
+      {
+        code: "runtime_image_missing_tag_or_digest",
+        image: config.runtime.image,
+        message: `runtime.image "${config.runtime.image}" has no explicit tag or digest; use a pinned tag or digest for reproducible runs.`,
+      },
+    ];
+  }
+
+  if (reference.tag.toLowerCase() === "latest") {
+    return [
+      {
+        code: "runtime_image_latest_tag",
+        image: config.runtime.image,
+        message: `runtime.image "${config.runtime.image}" uses the mutable "latest" tag; use a pinned tag or digest for reproducible runs.`,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function parseDockerImageReference(image: string): {
+  tag: string | null;
+  digest: string | null;
+} {
+  const digestSeparatorIndex = image.indexOf("@");
+  const nameAndTag =
+    digestSeparatorIndex === -1 ? image : image.slice(0, digestSeparatorIndex);
+  const digest =
+    digestSeparatorIndex === -1 ? null : image.slice(digestSeparatorIndex + 1);
+  const lastSlashIndex = nameAndTag.lastIndexOf("/");
+  const lastColonIndex = nameAndTag.lastIndexOf(":");
+
+  return {
+    tag: lastColonIndex > lastSlashIndex ? nameAndTag.slice(lastColonIndex + 1) : null,
+    digest,
+  };
 }

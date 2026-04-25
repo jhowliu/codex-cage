@@ -117,6 +117,8 @@ guards:
 
 `runtime.image` accepts any valid Docker image reference and defaults to the Codex Cage GHCR base image. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image before cloning the target repository. The first version uses `.codex-cage/` as the Docker build context, so target runtime Dockerfiles should keep package-install inputs inside that directory.
 
+Custom runtime images are trusted code because they become the environment that runs agent commands. Review them like other supply-chain inputs and prefer immutable or pinned references such as version tags or digests. Codex Cage warns when `runtime.image` uses `latest` or omits both a tag and digest; these warnings are recorded in run artifacts, but mutable image references remain supported.
+
 ## Prompt Instructions
 
 Codex Cage injects root-level repository instruction files into implementation and review prompts when they exist:

@@ -12,7 +12,7 @@ import type { IssueContext } from "../src/issue.js";
 import type { CommandResult, PublishSuccessfulRunInput } from "../src/publish.js";
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
 import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js";
-import { runCodexCage, type ShellRunner } from "../src/run.js";
+import { runCodexCage, type RunProgressEvent, type ShellRunner } from "../src/run.js";
 import { openRunStore } from "../src/state.js";
 
 const repo: GithubRepo = {
@@ -389,6 +389,102 @@ runtime:
     );
     assert.match(runtimeImage, /codex-cage\/runtime-run-image-123:latest/);
     assert.match(runtimeImage, /"source": "built"/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runCodexCage records configured runtime image warnings in artifacts", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+runtime:
+  image: registry.example.com/codex-cage/base:latest
+`);
+  const events: string[] = [];
+  const progressEvents: RunProgressEvent[] = [];
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      [
+        "git add --intent-to-add",
+        commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+      ],
+    ]),
+  );
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-image-warning",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async (input) => ({
+          branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+          commitMessage: "#26 Wire run command",
+          prTitle: "#26 Wire run command",
+          prBody: "body",
+          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+        }),
+        onProgress: (event) => {
+          progressEvents.push(event);
+        },
+      },
+    );
+
+    const runDirectory = join(cwd, ".codex-cage", "runs", "run-image-warning");
+    const resolvedConfig = JSON.parse(
+      await readFile(join(runDirectory, "resolved-config.json"), "utf8"),
+    ) as {
+      warnings: string[];
+      runtimeImageWarnings: Array<{ code: string; image: string; message: string }>;
+    };
+    const runtimeImage = JSON.parse(
+      await readFile(join(runDirectory, "runtime-image.json"), "utf8"),
+    ) as {
+      warnings: Array<{ code: string; image: string; message: string }>;
+    };
+    const warningMessage =
+      'runtime.image "registry.example.com/codex-cage/base:latest" uses the mutable "latest" tag; use a pinned tag or digest for reproducible runs.';
+
+    assert.equal(result.status, "succeeded");
+    assert.deepEqual(resolvedConfig.warnings, [warningMessage]);
+    assert.deepEqual(resolvedConfig.runtimeImageWarnings, [
+      {
+        code: "runtime_image_latest_tag",
+        image: "registry.example.com/codex-cage/base:latest",
+        message: warningMessage,
+      },
+    ]);
+    assert.deepEqual(runtimeImage.warnings, resolvedConfig.runtimeImageWarnings);
+    assert.deepEqual(
+      progressEvents
+        .filter((event) => event.type === "warning")
+        .map((event) => event.message),
+      [warningMessage],
+    );
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

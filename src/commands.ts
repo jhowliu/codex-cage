@@ -209,6 +209,8 @@ function formatRunProgressEvent(
         `${color.label("Branch")}: ${color.info(event.branch)}`,
         `${color.label("Artifacts")}: ${event.artifactDir}`,
       ].join("\n");
+    case "warning":
+      return `${color.warning("warning")}: ${event.message}`;
     case "iteration_started":
       return `${color.warning(
         `[iteration ${event.iteration}/${event.maxIterations}]`,
