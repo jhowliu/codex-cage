@@ -4,6 +4,7 @@ import {
   blockingReviewFeedback,
   buildReviewPrompt,
   parseReviewReport,
+  reviewReportJsonSchema,
   reviewNextAction,
   runIndependentReview,
   type ReviewAgentRunner,
@@ -85,6 +86,44 @@ test("parseReviewReport ignores non-json fenced blocks before JSON", () => {
       findings: [],
     },
   );
+});
+
+test("parseReviewReport normalizes nullable structured output fields", () => {
+  assert.deepEqual(
+    parseReviewReport(
+      JSON.stringify({
+        decision: "blocking",
+        summary: "Needs a fix.",
+        findings: [
+          {
+            severity: "blocking",
+            message: "Missing required behavior.",
+            path: null,
+            line: null,
+          },
+        ],
+      }),
+    ),
+    {
+      decision: "blocking",
+      summary: "Needs a fix.",
+      findings: [
+        {
+          severity: "blocking",
+          message: "Missing required behavior.",
+        },
+      ],
+    },
+  );
+});
+
+test("review report JSON schema requires every finding property", () => {
+  assert.deepEqual(reviewReportJsonSchema.properties.findings.items.required, [
+    "severity",
+    "message",
+    "path",
+    "line",
+  ]);
 });
 
 test("parseReviewReport rejects passing reports with blocking findings", () => {
