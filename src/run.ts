@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { execa } from "execa";
 import YAML from "yaml";
@@ -12,6 +13,7 @@ import {
   buildRuntimeImage,
   createDockerSandbox,
   dockerRunArgs,
+  type DockerBindMount,
   type DockerSandbox,
   type DockerSandboxOptions,
   type RuntimeImageBuildResult,
@@ -92,6 +94,7 @@ export type RunCodexCageDependencies = {
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
   generateRunId?: () => string;
+  resolveCodexAuthMount?: typeof resolveCodexAuthMount;
 };
 
 type RuntimeContext = {
@@ -109,6 +112,7 @@ type RuntimeContext = {
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
   promptContext: PromptContext;
+  codexAuthMount: DockerBindMount | null;
 };
 
 type PhaseBody = () => Promise<string | undefined>;
@@ -229,6 +233,10 @@ export async function runCodexCage(
       env: context.secrets,
     };
 
+    if (context.codexAuthMount !== null) {
+      sandboxOptions.mounts = [context.codexAuthMount];
+    }
+
     if (compose !== null) {
       sandboxOptions.serviceNetworkName = compose.networkName;
     }
@@ -308,6 +316,7 @@ async function prepareRuntimeContext(
   const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
   const authenticateRepo =
     dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
+  const findCodexAuthMount = dependencies.resolveCodexAuthMount ?? resolveCodexAuthMount;
   const secrets = normalizeRuntimeEnv(await readEnv(cwd));
   const issueOptions: Parameters<typeof fetchIssueContext>[1] = {
     comments: configResult.config.issue.comments,
@@ -345,6 +354,7 @@ async function prepareRuntimeContext(
     source: "configured" as const,
   };
   const promptContext = await buildPromptContext(cwd);
+  const codexAuthMount = await findCodexAuthMount(secrets);
 
   return {
     cwd,
@@ -361,6 +371,32 @@ async function prepareRuntimeContext(
     branchName,
     runtimeImage,
     promptContext,
+    codexAuthMount,
+  };
+}
+
+export async function resolveCodexAuthMount(
+  secrets: Record<string, string>,
+  authPath = resolve(homedir(), ".codex", "auth.json"),
+): Promise<DockerBindMount | null> {
+  if (hasUsableSecret(secrets.OPENAI_API_KEY)) {
+    return null;
+  }
+
+  try {
+    await access(authPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  }
+
+  return {
+    source: authPath,
+    target: "/home/agent/.codex/auth.json",
+    readonly: true,
   };
 }
 
@@ -391,14 +427,22 @@ async function readConfig(cwd: string): Promise<{
 }
 
 function normalizeRuntimeEnv(env: Record<string, string>): Record<string, string> {
-  if (env.GITHUB_TOKEN === undefined || env.GH_TOKEN !== undefined) {
-    return env;
+  const nonEmptyEnv = Object.fromEntries(
+    Object.entries(env).filter(([, value]) => value.trim() !== ""),
+  );
+
+  if (nonEmptyEnv.GITHUB_TOKEN === undefined || nonEmptyEnv.GH_TOKEN !== undefined) {
+    return nonEmptyEnv;
   }
 
   return {
-    ...env,
-    GH_TOKEN: env.GITHUB_TOKEN,
+    ...nonEmptyEnv,
+    GH_TOKEN: nonEmptyEnv.GITHUB_TOKEN,
   };
+}
+
+function hasUsableSecret(value: string | undefined): boolean {
+  return value !== undefined && value.trim() !== "";
 }
 
 async function runImplementationLoop(input: {

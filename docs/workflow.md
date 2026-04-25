@@ -34,7 +34,7 @@ GITHUB_TOKEN=...
 LINEAR_API_KEY=...
 ```
 
-`LINEAR_API_KEY` is required only for Linear issue URLs. `.codex-cage.env` is ignored by `codex-cage init` and must not be committed.
+`OPENAI_API_KEY` is optional when the host has Codex OAuth credentials at `~/.codex/auth.json`; Codex Cage mounts only that file read-only into the agent container. `LINEAR_API_KEY` is required only for Linear issue URLs. `.codex-cage.env` is ignored by `codex-cage init` and must not be committed.
 
 ### GitHub Token Permissions
 

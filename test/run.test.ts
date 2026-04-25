@@ -12,7 +12,7 @@ import type { IssueContext } from "../src/issue.js";
 import type { CommandResult, PublishSuccessfulRunInput } from "../src/publish.js";
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
 import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js";
-import { runCodexCage, type ShellRunner } from "../src/run.js";
+import { resolveCodexAuthMount, runCodexCage, type ShellRunner } from "../src/run.js";
 import { openRunStore } from "../src/state.js";
 
 const repo: GithubRepo = {
@@ -137,7 +137,7 @@ verify:
       },
       {
         generateRunId: () => "run-test-123",
-        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value", OPENAI_API_KEY: "" }),
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
@@ -151,6 +151,11 @@ verify:
           sandboxOptions.push(options);
           return fakeSandbox(events);
         },
+        resolveCodexAuthMount: async () => ({
+          source: "/Users/me/.codex/auth.json",
+          target: "/home/agent/.codex/auth.json",
+          readonly: true,
+        }),
         createShellRunner: () => shell,
         runIndependentReview: async (input) => {
           reviewIssueContext = input.issueContext;
@@ -181,6 +186,13 @@ verify:
       GH_TOKEN: "token-value",
       GITHUB_TOKEN: "token-value",
     });
+    assert.deepEqual(sandboxOptions[0]?.mounts, [
+      {
+        source: "/Users/me/.codex/auth.json",
+        target: "/home/agent/.codex/auth.json",
+        readonly: true,
+      },
+    ]);
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
 
@@ -211,6 +223,28 @@ verify:
       details.phases.map((phase) => phase.name),
       ["preflight", "cloning", "implement", "verify", "review", "pr"],
     );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("resolveCodexAuthMount uses host Codex OAuth auth only without API key", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-auth-"));
+  const authPath = join(cwd, "auth.json");
+
+  try {
+    await writeFile(authPath, "{}", "utf8");
+
+    assert.deepEqual(await resolveCodexAuthMount({}, authPath), {
+      source: authPath,
+      target: "/home/agent/.codex/auth.json",
+      readonly: true,
+    });
+    assert.equal(
+      await resolveCodexAuthMount({ OPENAI_API_KEY: "sk-test" }, authPath),
+      null,
+    );
+    assert.equal(await resolveCodexAuthMount({}, join(cwd, "missing.json")), null);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

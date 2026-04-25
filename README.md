@@ -114,7 +114,7 @@ Codex Cage uses a per-run Compose project name, starts services with `docker com
 
 ## Secret Guards
 
-Local secrets live in `.codex-cage.env`, which is parsed by the orchestrator and passed to Docker as process environment, not mounted into the container or written into command arguments. Known secret values are redacted from logs.
+Local secrets live in `.codex-cage.env`, which is parsed by the orchestrator and passed to Docker as process environment, not written into command arguments. If `OPENAI_API_KEY` is not set and `~/.codex/auth.json` exists, Codex Cage mounts only that Codex OAuth auth file read-only into the agent container. Known secret values are redacted from logs.
 
 Guard scanning checks diffs for injected secret values, high-confidence token patterns, private key material, and sensitive auth files such as `.env`, `.codex-cage.env`, `.npmrc`, `.ssh/*`, `.config/gh/*`, and `.aws/*`. Sample env files like `.env.example`, `.env.sample`, and `.env.template` are allowed, but their added content is still scanned for secret-looking values.
 

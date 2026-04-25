@@ -30,6 +30,7 @@ test("init creates config, env example, and gitignore entries", async () => {
 
     const envExample = await readFile(join(cwd, ".codex-cage.env.example"), "utf8");
     assert.match(envExample, /OPENAI_API_KEY=/);
+    assert.match(envExample, /Codex OAuth auth/);
     assert.match(envExample, /GITHUB_TOKEN=/);
 
     const instructions = await readFile(
