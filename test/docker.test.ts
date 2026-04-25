@@ -98,6 +98,7 @@ test("createDockerSandbox creates resources, clones into volume, runs commands, 
 
   assert.equal(sandbox.volumeName, "codex-cage-run-1-workspace");
   assert.equal(sandbox.networkName, "codex-cage-run-1");
+  assert.equal(sandbox.ownedNetworkName, "codex-cage-run-1");
   assert.equal(runner.calls.length, 6);
   assert.deepEqual(runner.calls[0]?.slice(0, 2), ["volume", "create"]);
   assert.deepEqual(runner.calls[1]?.slice(0, 2), ["network", "create"]);
@@ -108,4 +109,40 @@ test("createDockerSandbox creates resources, clones into volume, runs commands, 
   assert.equal(runner.calls[3]?.at(-1), "npm test");
   assert.deepEqual(runner.calls[4], ["network", "rm", "codex-cage-run-1"]);
   assert.deepEqual(runner.calls[5], ["volume", "rm", "codex-cage-run-1-workspace"]);
+});
+
+test("createDockerSandbox can attach agent commands to an externally managed service network", async () => {
+  const runner = recordingRunner();
+  const sandbox = createDockerSandbox(
+    {
+      runId: "run-1",
+      cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+      serviceNetworkName: "codex-cage-run-1_default",
+    },
+    runner,
+  );
+
+  await sandbox.create();
+  await sandbox.cloneRepository();
+  await sandbox.runCommand("npm test");
+  await sandbox.cleanup();
+
+  assert.equal(sandbox.networkName, "codex-cage-run-1_default");
+  assert.equal(sandbox.ownedNetworkName, null);
+  assert.equal(runner.calls.length, 4);
+  assert.deepEqual(runner.calls[0]?.slice(0, 2), ["volume", "create"]);
+  assert.equal(
+    runner.calls.some((call) => call[0] === "network"),
+    false,
+  );
+  assert.equal(
+    runner.calls[1]?.at((runner.calls[1] ?? []).indexOf("--network") + 1),
+    "codex-cage-run-1_default",
+  );
+  assert.equal(
+    runner.calls[2]?.at((runner.calls[2] ?? []).indexOf("--network") + 1),
+    "codex-cage-run-1_default",
+  );
+  assert.equal(runner.calls.flat().includes("/var/run/docker.sock"), false);
+  assert.deepEqual(runner.calls[3], ["volume", "rm", "codex-cage-run-1-workspace"]);
 });

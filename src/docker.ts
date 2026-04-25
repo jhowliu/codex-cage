@@ -9,6 +9,7 @@ export type DockerSandboxOptions = {
   cloneUrl: string;
   image?: string;
   workspacePath?: string;
+  serviceNetworkName?: string;
   labels?: Record<string, string>;
   env?: Record<string, string>;
 };
@@ -18,6 +19,7 @@ export type DockerSandbox = {
   image: string;
   volumeName: string;
   networkName: string;
+  ownedNetworkName: string | null;
   workspacePath: string;
   create(): Promise<void>;
   cloneRepository(): Promise<void>;
@@ -48,6 +50,8 @@ export function createDockerSandbox(
   const image = options.image ?? defaultSandboxImage;
   const workspacePath = options.workspacePath ?? defaultWorkspacePath;
   const { volumeName, networkName } = dockerResourceNames(options.runId);
+  const ownedNetworkName = options.serviceNetworkName === undefined ? networkName : null;
+  const agentNetworkName = options.serviceNetworkName ?? networkName;
   const labels = {
     [runIdLabelName]: options.runId,
     ...options.labels,
@@ -57,17 +61,20 @@ export function createDockerSandbox(
     runId: options.runId,
     image,
     volumeName,
-    networkName,
+    networkName: agentNetworkName,
+    ownedNetworkName,
     workspacePath,
     async create(): Promise<void> {
       await runner.run(volumeCreateArgs(volumeName, labels));
-      await runner.run(networkCreateArgs(networkName, labels));
+      if (ownedNetworkName !== null) {
+        await runner.run(networkCreateArgs(ownedNetworkName, labels));
+      }
     },
     async cloneRepository(): Promise<void> {
       await runner.run(
         dockerRunArgs({
           image,
-          networkName,
+          networkName: agentNetworkName,
           volumeName,
           workspacePath,
           labels,
@@ -80,7 +87,7 @@ export function createDockerSandbox(
       await runner.run(
         dockerRunArgs({
           image,
-          networkName,
+          networkName: agentNetworkName,
           volumeName,
           workspacePath,
           labels,
@@ -90,7 +97,10 @@ export function createDockerSandbox(
       );
     },
     async cleanup(): Promise<void> {
-      await cleanupDockerResources({ volumeName, networkName }, runner);
+      if (ownedNetworkName !== null) {
+        await runner.run(["network", "rm", ownedNetworkName]);
+      }
+      await runner.run(["volume", "rm", volumeName]);
     },
   };
 }
