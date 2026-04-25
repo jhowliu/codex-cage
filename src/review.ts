@@ -230,7 +230,7 @@ export function blockingReviewFeedback(report: ReviewReport): string {
 }
 
 function extractJsonObject(output: string): string {
-  const fencedJson = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const fencedJson = output.match(/```json\s*([\s\S]*?)```/i)?.[1]?.trim();
 
   if (fencedJson !== undefined) {
     return fencedJson;

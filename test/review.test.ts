@@ -76,6 +76,17 @@ test("parseReviewReport accepts strict structured JSON from the review agent", (
   });
 });
 
+test("parseReviewReport ignores non-json fenced blocks before JSON", () => {
+  assert.deepEqual(
+    parseReviewReport(`\n\`\`\`bash\n-code\n\`\`\`\n\n${passReportJson}\n`),
+    {
+      decision: "pass",
+      summary: "No blocking issues.",
+      findings: [],
+    },
+  );
+});
+
 test("parseReviewReport rejects passing reports with blocking findings", () => {
   assert.throws(
     () =>
