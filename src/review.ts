@@ -69,10 +69,22 @@ const reviewFindingSchema = z
   .object({
     severity: z.enum(["blocking", "non_blocking"]),
     message: z.string().min(1),
-    path: z.string().min(1).optional(),
-    line: z.number().int().positive().optional(),
+    path: z.string().min(1).nullable().optional(),
+    line: z.number().int().positive().nullable().optional(),
   })
-  .strict();
+  .strict()
+  .transform((finding): ReviewFinding => {
+    return {
+      severity: finding.severity,
+      message: finding.message,
+      ...(finding.path === null || finding.path === undefined
+        ? {}
+        : { path: finding.path }),
+      ...(finding.line === null || finding.line === undefined
+        ? {}
+        : { line: finding.line }),
+    };
+  });
 
 const reviewReportSchema = z
   .object({
@@ -121,7 +133,7 @@ export const reviewReportJsonSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["severity", "message"],
+        required: ["severity", "message", "path", "line"],
         properties: {
           severity: {
             type: "string",
@@ -132,12 +144,10 @@ export const reviewReportJsonSchema = {
             minLength: 1,
           },
           path: {
-            type: "string",
-            minLength: 1,
+            type: ["string", "null"],
           },
           line: {
-            type: "integer",
-            minimum: 1,
+            type: ["integer", "null"],
           },
         },
       },
@@ -227,8 +237,8 @@ Return only JSON matching this schema:
     {
       "severity": "blocking" | "non_blocking",
       "message": "specific finding",
-      "path": "optional/file/path",
-      "line": 123
+      "path": "optional/file/path or null",
+      "line": 123 or null
     }
   ]
 }
