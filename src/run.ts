@@ -872,13 +872,19 @@ function shellCommandRunner(shell: ShellRunner, executable: string): CommandRunn
 function reviewAgentRunner(shell: ShellRunner): ReviewAgentRunner {
   return {
     async run(input): Promise<string> {
+      const outputSchemaPath = "/tmp/codex-cage-review-output-schema.json";
+      const writeOutputSchemaCommand = `printf %s ${shellQuote(
+        JSON.stringify(input.outputSchema),
+      )} > ${shellQuote(outputSchemaPath)}`;
+
       return await requiredShell(
         shell,
-        codexExecCommand({
+        `${writeOutputSchemaCommand} && ${codexExecCommand({
           model: input.model,
           sandbox: "read-only",
+          outputSchemaPath,
           prompt: input.prompt,
-        }),
+        })}`,
       );
     },
   };
@@ -977,16 +983,24 @@ ${comments}
 function codexExecCommand(input: {
   model: string;
   sandbox: "read-only" | "workspace-write";
+  outputSchemaPath?: string | undefined;
   prompt: string;
 }): string {
-  return [
+  const args = [
     "codex exec",
     "--model",
     shellQuote(input.model),
     "--sandbox",
     shellQuote(input.sandbox),
-    shellQuote(input.prompt),
-  ].join(" ");
+  ];
+
+  if (input.outputSchemaPath !== undefined) {
+    args.push("--output-schema", shellQuote(input.outputSchemaPath));
+  }
+
+  args.push(shellQuote(input.prompt));
+
+  return args.join(" ");
 }
 
 function generateRunId(): string {

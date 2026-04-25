@@ -76,6 +76,17 @@ test("parseReviewReport accepts strict structured JSON from the review agent", (
   });
 });
 
+test("parseReviewReport ignores non-json fenced blocks before JSON", () => {
+  assert.deepEqual(
+    parseReviewReport(`\n\`\`\`bash\n-code\n\`\`\`\n\n${passReportJson}\n`),
+    {
+      decision: "pass",
+      summary: "No blocking issues.",
+      findings: [],
+    },
+  );
+});
+
 test("parseReviewReport rejects passing reports with blocking findings", () => {
   assert.throws(
     () =>
@@ -156,6 +167,12 @@ test("runIndependentReview runs a fresh review runner and returns parsed action"
   assert.equal(runner.calls.length, 1);
   assert.equal(runner.calls[0]?.cwd, "/repo");
   assert.equal(runner.calls[0]?.model, "gpt-5.4");
+  assert.equal(runner.calls[0]?.outputSchema.type, "object");
+  assert.deepEqual(runner.calls[0]?.outputSchema.required, [
+    "decision",
+    "summary",
+    "findings",
+  ]);
   assert.deepEqual(runner.calls[0]?.env, { OPENAI_API_KEY: "secret" });
   assert.equal(result.report.decision, "pass");
   assert.deepEqual(result.nextAction, { action: "continue" });

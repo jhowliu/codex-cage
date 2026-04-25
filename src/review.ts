@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { execa } from "execa";
 import { z } from "zod";
 
@@ -25,6 +28,7 @@ export type ReviewAgentRunInput = {
   cwd: string;
   model: string;
   prompt: string;
+  outputSchema: Record<string, unknown>;
   env?: Record<string, string> | undefined;
 };
 
@@ -99,17 +103,82 @@ const reviewReportSchema = z
     }
   });
 
+export const reviewReportJsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decision", "summary", "findings"],
+  properties: {
+    decision: {
+      type: "string",
+      enum: ["pass", "blocking"],
+    },
+    summary: {
+      type: "string",
+      minLength: 1,
+    },
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["severity", "message"],
+        properties: {
+          severity: {
+            type: "string",
+            enum: ["blocking", "non_blocking"],
+          },
+          message: {
+            type: "string",
+            minLength: 1,
+          },
+          path: {
+            type: "string",
+            minLength: 1,
+          },
+          line: {
+            type: "integer",
+            minimum: 1,
+          },
+        },
+      },
+    },
+  },
+} as const satisfies Record<string, unknown>;
+
 export const execaReviewAgentRunner: ReviewAgentRunner = {
   async run(input: ReviewAgentRunInput): Promise<string> {
-    const args = ["exec", "--model", input.model, "--cwd", input.cwd, input.prompt];
+    const tempDirectory = await mkdtemp(join(tmpdir(), "codex-cage-review-"));
+    const outputSchemaPath = join(tempDirectory, "review-output-schema.json");
 
-    if (input.env === undefined) {
-      const result = await execa("codex", args);
+    try {
+      await writeFile(
+        outputSchemaPath,
+        `${JSON.stringify(input.outputSchema, null, 2)}\n`,
+        "utf8",
+      );
+      const args = [
+        "exec",
+        "--model",
+        input.model,
+        "--sandbox",
+        "read-only",
+        "--cd",
+        input.cwd,
+        "--output-schema",
+        outputSchemaPath,
+        input.prompt,
+      ];
+
+      if (input.env === undefined) {
+        const result = await execa("codex", args);
+        return result.stdout;
+      }
+
+      const result = await execa("codex", args, { env: input.env });
       return result.stdout;
+    } finally {
+      await rm(tempDirectory, { recursive: true, force: true });
     }
-
-    const result = await execa("codex", args, { env: input.env });
-    return result.stdout;
   },
 };
 
@@ -122,6 +191,7 @@ export async function runIndependentReview(
     cwd: input.cwd,
     model: input.model,
     prompt,
+    outputSchema: reviewReportJsonSchema,
     env: input.env,
   });
   const currentDiff = await input.readCurrentDiff();
@@ -230,7 +300,7 @@ export function blockingReviewFeedback(report: ReviewReport): string {
 }
 
 function extractJsonObject(output: string): string {
-  const fencedJson = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const fencedJson = output.match(/```json\s*([\s\S]*?)```/i)?.[1]?.trim();
 
   if (fencedJson !== undefined) {
     return fencedJson;
