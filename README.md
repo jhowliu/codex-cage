@@ -2,7 +2,7 @@
 
 Codex Cage is a lightweight CLI for running Codex against issue-driven work in an isolated Docker workspace. The CLI can initialize target repos, run the issue-driven orchestration loop, inspect local run metadata, and clean up managed Docker resources.
 
-Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
+Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md). For copy-pasteable CLI usage, see [docs/cli-examples.md](docs/cli-examples.md).
 
 ## Current Commands
 
@@ -10,7 +10,7 @@ Full setup, token, configuration, security, and QA details live in [docs/workflo
 codex-cage --help
 codex-cage init
 codex-cage init --dockerfile
-codex-cage run --issue <url>
+codex-cage run <issue-url>
 codex-cage runs list
 codex-cage runs show <run-id>
 codex-cage cleanup
@@ -59,10 +59,12 @@ Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such 
 ## Run an Issue
 
 ```bash
-codex-cage run --issue https://github.com/OWNER/REPO/issues/123
+codex-cage run https://github.com/OWNER/REPO/issues/123
 ```
 
 The `run` command reads `.codex-cage.yml` and `.codex-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
+
+See [CLI Examples](docs/cli-examples.md) for GitHub, Linear, override, run inspection, and cleanup examples. The legacy `codex-cage run --issue <url>` form remains available for compatibility.
 
 ## Issue Context
 
