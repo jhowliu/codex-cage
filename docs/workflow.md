@@ -151,6 +151,26 @@ Non-goals:
 - Codex Cage does not manage cloud IAM or external secret rotation.
 - Codex Cage does not update Linear issues.
 
+## Base Image
+
+The base agent image is defined in `docker/base/Dockerfile` and published to GHCR:
+
+```text
+ghcr.io/jhowliu/codex-cage/base:0.1.0
+```
+
+The image is intentionally orchestration-only. It includes Node.js/npm, a pinned `@openai/codex` CLI, `git`, GitHub CLI `gh`, `curl`, `jq`, certificates, OpenSSH client, the non-root `agent` user, and `/workspace`. It does not include Docker CLI, Python, Go, Rust, Java, native build toolchains, database clients, browser tooling, `tini`, or a custom entrypoint.
+
+Target repositories that need language runtimes or system packages should use `codex-cage init --dockerfile` and add those dependencies in `.codex-cage/Dockerfile`.
+
+The publish workflow supports manual dispatch and tags shaped like `base-v0.1.0`. It publishes both the immutable version tag and `latest`, but runtime defaults should use version tags.
+
+Local image validation is opt-in because it requires Docker and network access:
+
+```bash
+npm run qa:image
+```
+
 ## Cleanup
 
 ```bash
