@@ -72,6 +72,16 @@ Target repositories are resolved in this order:
 
 If a GitHub issue URL points at a different repo than the current directory origin, Codex Cage fails unless `--repo` is passed explicitly. GitHub operations use HTTPS token auth with `GITHUB_TOKEN`; SSH remotes are normalized to `owner/repo` and converted to token-authenticated HTTPS clone URLs internally.
 
+## Docker Sandbox
+
+Codex Cage prepares disposable Docker resources per run:
+
+- A labeled Docker volume for `/workspace`
+- A labeled Docker network for run-local connectivity
+- An agent container using the pinned default image `codex-cage/base:0.1.0`
+
+The sandbox runs as the non-root `agent` user, clones the target repo into the volume, and does not bind mount the host working tree, Docker socket, SSH config, GitHub CLI config, or host ports.
+
 ## Development
 
 ```bash
