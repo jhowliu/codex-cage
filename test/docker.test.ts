@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildRuntimeImage,
   cleanupManagedDockerResources,
   createDockerSandbox,
+  defaultSandboxImage,
+  dockerBuildArgs,
   dockerResourceNames,
   dockerRunArgs,
   networkCreateArgs,
+  runtimeImageName,
   volumeCreateArgs,
   type DockerCommandResult,
   type DockerCommandRunner,
@@ -55,6 +59,7 @@ test("dockerResourceNames creates stable Docker-safe resource names", () => {
     volumeName: "codex-cage-run-123-abc-workspace",
     networkName: "codex-cage-run-123-abc",
   });
+  assert.equal(runtimeImageName("RUN 123/ABC"), "codex-cage/runtime-run-123-abc:latest");
 });
 
 test("volume and network resources carry managed labels", () => {
@@ -80,7 +85,7 @@ test("volume and network resources carry managed labels", () => {
 
 test("dockerRunArgs uses volume workspace and avoids host-sensitive mounts", () => {
   const args = dockerRunArgs({
-    image: "codex-cage/base:0.1.0",
+    image: defaultSandboxImage,
     networkName: "codex-cage-run-1",
     volumeName: "codex-cage-run-1-workspace",
     workspacePath: "/workspace",
@@ -106,6 +111,57 @@ test("dockerRunArgs uses volume workspace and avoids host-sensitive mounts", () 
   );
   assert.equal(joinedArgs.includes("secret"), false);
   assert.deepEqual(args.slice(-3), ["sh", "-lc", "npm test"]);
+});
+
+test("dockerBuildArgs labels per-run runtime images", () => {
+  assert.deepEqual(
+    dockerBuildArgs({
+      image: "codex-cage/runtime-run-1:latest",
+      dockerfilePath: "/repo/.codex-cage/Dockerfile",
+      contextPath: "/repo/.codex-cage",
+      labels: {
+        "codex-cage.run_id": "run-1",
+        "codex-cage.kind": "runtime-image",
+      },
+    }),
+    [
+      "build",
+      "--file",
+      "/repo/.codex-cage/Dockerfile",
+      "--tag",
+      "codex-cage/runtime-run-1:latest",
+      "--label",
+      "codex-cage.managed=true",
+      "--label",
+      "codex-cage.run_id=run-1",
+      "--label",
+      "codex-cage.kind=runtime-image",
+      "/repo/.codex-cage",
+    ],
+  );
+});
+
+test("buildRuntimeImage builds a labeled per-run image", async () => {
+  const runner = recordingRunner();
+  const result = await buildRuntimeImage({
+    runId: "run-1",
+    dockerfilePath: "/repo/.codex-cage/Dockerfile",
+    contextPath: "/repo/.codex-cage",
+    runner,
+  });
+
+  assert.deepEqual(result, {
+    image: "codex-cage/runtime-run-1:latest",
+    dockerfilePath: "/repo/.codex-cage/Dockerfile",
+    contextPath: "/repo/.codex-cage",
+  });
+  assert.deepEqual(runner.calls[0]?.args.slice(0, 5), [
+    "build",
+    "--file",
+    "/repo/.codex-cage/Dockerfile",
+    "--tag",
+    "codex-cage/runtime-run-1:latest",
+  ]);
 });
 
 test("createDockerSandbox creates resources, clones into volume, runs commands, and cleans up", async () => {
@@ -198,6 +254,7 @@ test("cleanupManagedDockerResources removes stopped resources and skips active r
 
   assert.deepEqual(report, {
     containers: ["stopped1"],
+    images: [],
     networks: ["codex-cage-run-stale"],
     volumes: ["codex-cage-run-stale-workspace"],
     skippedActiveRunIds: ["run-active"],
@@ -240,6 +297,8 @@ test("cleanupManagedDockerResources --all removes active managed resources expli
     result(
       "codex-cage-run-active-workspace\trun-active\ncodex-cage-run-stale-workspace\trun-stale\n",
     ),
+    result("image1\tcodex-cage/runtime-run-stale:latest\trun-stale\n"),
+    result(),
     result(),
     result(),
     result(),
@@ -249,23 +308,33 @@ test("cleanupManagedDockerResources --all removes active managed resources expli
 
   assert.deepEqual(report, {
     containers: ["active1", "stopped1"],
+    images: ["codex-cage/runtime-run-stale:latest"],
     networks: ["codex-cage-run-active", "codex-cage-run-stale"],
     volumes: ["codex-cage-run-active-workspace", "codex-cage-run-stale-workspace"],
     skippedActiveRunIds: [],
   });
-  assert.deepEqual(runner.calls.at(3), ["rm", "--force", "active1", "stopped1"]);
-  assert.deepEqual(runner.calls.at(4), [
+  assert.deepEqual(runner.calls.at(3), [
+    "image",
+    "ls",
+    "--filter",
+    "label=codex-cage.managed=true",
+    "--format",
+    '{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Label "codex-cage.run_id"}}',
+  ]);
+  assert.deepEqual(runner.calls.at(4), ["rm", "--force", "active1", "stopped1"]);
+  assert.deepEqual(runner.calls.at(5), [
     "network",
     "rm",
     "codex-cage-run-active",
     "codex-cage-run-stale",
   ]);
-  assert.deepEqual(runner.calls.at(5), [
+  assert.deepEqual(runner.calls.at(6), [
     "volume",
     "rm",
     "codex-cage-run-active-workspace",
     "codex-cage-run-stale-workspace",
   ]);
+  assert.deepEqual(runner.calls.at(7), ["image", "rm", "image1"]);
 });
 
 test("cleanupManagedDockerResources reports no-op cleanup without touching artifacts", async () => {
@@ -275,6 +344,7 @@ test("cleanupManagedDockerResources reports no-op cleanup without touching artif
 
   assert.deepEqual(report, {
     containers: [],
+    images: [],
     networks: [],
     volumes: [],
     skippedActiveRunIds: [],

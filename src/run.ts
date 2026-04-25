@@ -9,10 +9,12 @@ import {
 } from "./compose.js";
 import { parseCodexCageConfig, type CodexCageConfig } from "./config.js";
 import {
+  buildRuntimeImage,
   createDockerSandbox,
   dockerRunArgs,
   type DockerSandbox,
   type DockerSandboxOptions,
+  type RuntimeImageBuildResult,
 } from "./docker.js";
 import {
   assertNoGuardViolations,
@@ -75,6 +77,7 @@ export type RunCodexCageDependencies = {
   readEnv?: typeof readCodexCageEnv;
   openRunStore?: typeof openRunStore;
   createDockerSandbox?: (options: DockerSandboxOptions) => DockerSandbox;
+  buildRuntimeImage?: typeof buildRuntimeImage;
   createShellRunner?: (
     sandbox: DockerSandbox,
     env: Record<string, string>,
@@ -98,6 +101,7 @@ type RuntimeContext = {
   draft: boolean;
   runId: string;
   branchName: string;
+  runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
 };
 
 type PhaseBody = () => Promise<string | undefined>;
@@ -112,6 +116,7 @@ export async function runCodexCage(
   const context = await prepareRuntimeContext(cwd, options, dependencies);
   const openStore = dependencies.openRunStore ?? openRunStore;
   const createSandbox = dependencies.createDockerSandbox ?? createDockerSandbox;
+  const buildImage = dependencies.buildRuntimeImage ?? buildRuntimeImage;
   const makeShellRunner = dependencies.createShellRunner ?? createDockerShellRunner;
   const makeComposeProject = dependencies.createComposeProject ?? createComposeProject;
   const review = dependencies.runIndependentReview ?? runIndependentReview;
@@ -136,6 +141,7 @@ export async function runCodexCage(
       config: context.config,
       warnings: context.configWarnings,
       repoSource: context.repoResolution.source,
+      runtimeImage: context.runtimeImage,
     });
 
     await runPhase(store, context.runId, "preflight", async () => {
@@ -146,6 +152,43 @@ export async function runCodexCage(
         `Branch: ${context.branchName}`,
       ].join("\n");
     });
+
+    const runtimeDockerfile = context.config.runtime.dockerfile;
+
+    if (runtimeDockerfile !== null) {
+      try {
+        context.runtimeImage = await runPhase(
+          store,
+          context.runId,
+          "runtime_image",
+          async () => {
+            const result = await buildImage({
+              runId: context.runId,
+              dockerfilePath: resolve(cwd, runtimeDockerfile),
+              contextPath: resolve(cwd, ".codex-cage"),
+            });
+
+            return {
+              log: [
+                `Built runtime image: ${result.image}`,
+                `Dockerfile: ${result.dockerfilePath}`,
+                `Build context: ${result.contextPath}`,
+              ].join("\n"),
+              value: { ...result, source: "built" as const },
+            };
+          },
+        );
+      } catch (error) {
+        throw new RunFailureError("runtime_image_failed", formatError(error));
+      }
+    }
+
+    await writeJsonArtifact(
+      store,
+      context.runId,
+      "runtime-image.json",
+      context.runtimeImage,
+    );
 
     if (hasComposeServices(context.config.services)) {
       const composeFile = context.config.services.compose;
@@ -174,6 +217,7 @@ export async function runCodexCage(
     const sandboxOptions: DockerSandboxOptions = {
       runId: context.runId,
       cloneUrl: context.authenticatedRepo.cloneUrl,
+      image: context.runtimeImage.image,
       env: context.secrets,
     };
 
@@ -256,7 +300,7 @@ async function prepareRuntimeContext(
   const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
   const authenticateRepo =
     dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
-  const secrets = await readEnv(cwd);
+  const secrets = normalizeRuntimeEnv(await readEnv(cwd));
   const issueOptions: Parameters<typeof fetchIssueContext>[1] = {
     comments: configResult.config.issue.comments,
   };
@@ -286,6 +330,12 @@ async function prepareRuntimeContext(
   const draft = options.draft ?? configResult.config.pr.draft;
   const runId = dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
+  const runtimeImage = {
+    image: configResult.config.runtime.image,
+    dockerfilePath: "",
+    contextPath: "",
+    source: "configured" as const,
+  };
 
   return {
     cwd,
@@ -300,6 +350,7 @@ async function prepareRuntimeContext(
     draft,
     runId,
     branchName,
+    runtimeImage,
   };
 }
 
@@ -327,6 +378,17 @@ async function readConfig(cwd: string): Promise<{
       error instanceof Error ? error.message : "Invalid Codex Cage config.",
     );
   }
+}
+
+function normalizeRuntimeEnv(env: Record<string, string>): Record<string, string> {
+  if (env.GITHUB_TOKEN === undefined || env.GH_TOKEN !== undefined) {
+    return env;
+  }
+
+  return {
+    ...env,
+    GH_TOKEN: env.GITHUB_TOKEN,
+  };
 }
 
 async function runImplementationLoop(input: {

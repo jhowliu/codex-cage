@@ -46,6 +46,21 @@ export type DockerResourceNames = {
   networkName: string;
 };
 
+export type RuntimeImageBuildOptions = {
+  runId: string;
+  dockerfilePath: string;
+  contextPath: string;
+  imageName?: string;
+  labels?: Record<string, string>;
+  runner?: DockerRunner;
+};
+
+export type RuntimeImageBuildResult = {
+  image: string;
+  dockerfilePath: string;
+  contextPath: string;
+};
+
 export type CleanupDockerOptions = {
   all?: boolean;
   runner?: DockerCommandRunner;
@@ -53,12 +68,13 @@ export type CleanupDockerOptions = {
 
 export type CleanupDockerReport = {
   containers: string[];
+  images: string[];
   networks: string[];
   volumes: string[];
   skippedActiveRunIds: string[];
 };
 
-export const defaultSandboxImage = "codex-cage/base:0.1.0";
+export const defaultSandboxImage = "ghcr.io/jhowliu/codex-cage/base:0.1.0";
 export const defaultWorkspacePath = "/workspace";
 
 const runIdLabelName = "codex-cage.run_id";
@@ -160,6 +176,33 @@ export async function cleanupDockerResources(
   await runner.run(["volume", "rm", resources.volumeName]);
 }
 
+export async function buildRuntimeImage(
+  options: RuntimeImageBuildOptions,
+): Promise<RuntimeImageBuildResult> {
+  const runner = options.runner ?? execaDockerRunner;
+  const image = options.imageName ?? runtimeImageName(options.runId);
+  const labels = {
+    [runIdLabelName]: options.runId,
+    "codex-cage.kind": "runtime-image",
+    ...options.labels,
+  };
+
+  await runner.run(
+    dockerBuildArgs({
+      image,
+      dockerfilePath: options.dockerfilePath,
+      contextPath: options.contextPath,
+      labels,
+    }),
+  );
+
+  return {
+    image,
+    dockerfilePath: options.dockerfilePath,
+    contextPath: options.contextPath,
+  };
+}
+
 export async function cleanupManagedDockerResources(
   options: CleanupDockerOptions = {},
 ): Promise<CleanupDockerReport> {
@@ -181,6 +224,7 @@ export async function cleanupManagedDockerResources(
   const volumesToRemove = (await listManagedNamedResources(runner, "volume")).filter(
     (resource) => all || resource.runId === null || !activeRunIds.has(resource.runId),
   );
+  const imagesToRemove = all ? await listManagedImages(runner) : [];
 
   if (containersToRemove.length > 0) {
     await runRequiredDockerCommand(runner, [
@@ -206,8 +250,17 @@ export async function cleanupManagedDockerResources(
     ]);
   }
 
+  if (imagesToRemove.length > 0) {
+    await runRequiredDockerCommand(runner, [
+      "image",
+      "rm",
+      ...imagesToRemove.map((image) => image.id),
+    ]);
+  }
+
   return {
     containers: containersToRemove,
+    images: imagesToRemove.map((image) => image.name),
     networks: networksToRemove.map((resource) => resource.name),
     volumes: volumesToRemove.map((resource) => resource.name),
     skippedActiveRunIds: all ? [] : [...activeRunIds].sort(),
@@ -215,19 +268,16 @@ export async function cleanupManagedDockerResources(
 }
 
 export function dockerResourceNames(runId: string): DockerResourceNames {
-  const safeRunId = runId
-    .toLowerCase()
-    .replace(/[^a-z0-9_.-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-
-  if (safeRunId === "") {
-    throw new Error("Run id must contain at least one Docker-safe character.");
-  }
+  const safeRunId = safeDockerNameSegment(runId);
 
   return {
     volumeName: `codex-cage-${safeRunId}-workspace`,
     networkName: `codex-cage-${safeRunId}`,
   };
+}
+
+export function runtimeImageName(runId: string): string {
+  return `codex-cage/runtime-${safeDockerNameSegment(runId)}:latest`;
 }
 
 export function volumeCreateArgs(
@@ -242,6 +292,23 @@ export function networkCreateArgs(
   labels: Record<string, string>,
 ): string[] {
   return ["network", "create", ...labelArgs(labels), networkName];
+}
+
+export function dockerBuildArgs(input: {
+  image: string;
+  dockerfilePath: string;
+  contextPath: string;
+  labels: Record<string, string>;
+}): string[] {
+  return [
+    "build",
+    "--file",
+    input.dockerfilePath,
+    "--tag",
+    input.image,
+    ...labelArgs(input.labels),
+    input.contextPath,
+  ];
 }
 
 type DockerRunArgsInput = {
@@ -302,6 +369,12 @@ type ManagedNamedResource = {
   runId: string | null;
 };
 
+type ManagedImage = {
+  id: string;
+  name: string;
+  runId: string | null;
+};
+
 async function listManagedContainers(
   runner: DockerCommandRunner,
 ): Promise<ManagedContainer[]> {
@@ -327,6 +400,34 @@ async function listManagedContainers(
       return {
         id,
         state,
+        runId: runId === undefined || runId === "" ? null : runId,
+      };
+    });
+}
+
+async function listManagedImages(runner: DockerCommandRunner): Promise<ManagedImage[]> {
+  const result = await runRequiredDockerCommand(runner, [
+    "image",
+    "ls",
+    "--filter",
+    `label=${managedLabel}`,
+    "--format",
+    `{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Label "${runIdLabelName}"}}`,
+  ]);
+
+  return result.stdout
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const [id, name, runId] = line.split("\t");
+
+      if (id === undefined || name === undefined) {
+        throw new Error(`Unexpected docker image ls output: ${line}`);
+      }
+
+      return {
+        id,
+        name,
         runId: runId === undefined || runId === "" ? null : runId,
       };
     });
@@ -373,4 +474,17 @@ async function runRequiredDockerCommand(
   }
 
   return result;
+}
+
+function safeDockerNameSegment(value: string): string {
+  const safeValue = value
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  if (safeValue === "") {
+    throw new Error("Value must contain at least one Docker-safe character.");
+  }
+
+  return safeValue;
 }

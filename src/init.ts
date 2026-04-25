@@ -26,6 +26,10 @@ services:
   compose: null
   ready: []
 
+runtime:
+  image: ghcr.io/jhowliu/codex-cage/base:0.1.0
+  dockerfile: null
+
 agent:
   model: gpt-5.4
   max_iterations: 5
@@ -58,7 +62,7 @@ GITHUB_TOKEN=
 LINEAR_API_KEY=
 `;
 
-const dockerfile = `FROM node:22-bookworm
+const dockerfile = `FROM ghcr.io/jhowliu/codex-cage/base:0.1.0
 
 # Add target-repo system dependencies here.
 `;

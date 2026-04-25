@@ -88,11 +88,13 @@ Codex Cage prepares disposable Docker resources per run:
 
 - A labeled Docker volume for `/workspace`
 - A labeled Docker network for run-local connectivity
-- An agent container using the pinned default image `codex-cage/base:0.1.0`
+- An agent container using the pinned default image `ghcr.io/jhowliu/codex-cage/base:0.1.0`
 
 The sandbox runs as the non-root `agent` user, clones the target repo into the volume, and does not bind mount the host working tree, Docker socket, SSH config, GitHub CLI config, or host ports.
 
 The publishable base image is defined in `docker/base` and published to GHCR as `ghcr.io/jhowliu/codex-cage/base:<version>`. The image contains only the orchestration tools needed by Codex Cage: Node.js/npm, pinned Codex CLI, `git`, `gh`, `curl`, `jq`, certificates, OpenSSH client, and the non-root `agent` user. Target repositories should add project-specific runtimes or build tools through their own `.codex-cage/Dockerfile`.
+
+Runtime images are configured in `.codex-cage.yml`. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image from that Dockerfile using `.codex-cage/` as the build context before cloning the target repository. If no Dockerfile is configured, Codex Cage uses `runtime.image`.
 
 ## Compose Services
 
