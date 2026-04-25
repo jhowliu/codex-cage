@@ -14,6 +14,7 @@ const configPath = ".codex-cage.yml";
 const envExamplePath = ".codex-cage.env.example";
 const gitignorePath = ".gitignore";
 const dockerfilePath = ".codex-cage/Dockerfile";
+const instructionsPath = ".codex-cage/instructions.md";
 
 const defaultConfig = `# Codex Cage target repo configuration.
 # Replace the verify command before running Codex Cage.
@@ -67,6 +68,13 @@ const dockerfile = `FROM ghcr.io/jhowliu/codex-cage/base:0.1.0
 # Add target-repo system dependencies here.
 `;
 
+const instructions = `# Codex Cage Instructions
+
+- Follow the repository's existing style and tests.
+- Keep changes focused on the issue.
+- Do not commit, push, create pull requests, or write secrets.
+`;
+
 const gitignoreEntries = [".codex-cage.env", ".codex-cage/runs/", ".codex-cage/*.sqlite"];
 
 export async function initProject(
@@ -77,6 +85,7 @@ export async function initProject(
   const updated: string[] = [];
   const configFilePath = join(cwd, configPath);
   const dockerfileFilePath = join(cwd, dockerfilePath);
+  const instructionsFilePath = join(cwd, instructionsPath);
 
   await assertFileDoesNotExist(cwd, configFilePath);
 
@@ -85,6 +94,9 @@ export async function initProject(
   }
 
   await createFileOnce(cwd, configFilePath, defaultConfig, created);
+  if (!(await fileExists(instructionsFilePath))) {
+    await createFileOnce(cwd, instructionsFilePath, instructions, created);
+  }
   await mergeEnvExample(cwd, join(cwd, envExamplePath), created, updated);
   await appendGitignoreEntries(cwd, join(cwd, gitignorePath), updated);
 

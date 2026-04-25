@@ -108,6 +108,7 @@ test("runCodexCage executes the happy path and records a successful run", async 
 verify:
   - npm test
 `);
+  await writeFile(join(cwd, "AGENTS.md"), "Always write focused tests.\n", "utf8");
   const events: string[] = [];
   const sandboxOptions: DockerSandboxOptions[] = [];
   const shell = shellRunner(
@@ -126,6 +127,7 @@ verify:
     ]),
   );
   const published: PublishSuccessfulRunInput[] = [];
+  let reviewIssueContext = "";
 
   try {
     const result = await runCodexCage(
@@ -150,7 +152,10 @@ verify:
           return fakeSandbox(events);
         },
         createShellRunner: () => shell,
-        runIndependentReview: async () => passingReview(),
+        runIndependentReview: async (input) => {
+          reviewIssueContext = input.issueContext;
+          return passingReview();
+        },
         publishSuccessfulRun: async (input) => {
           published.push(input);
           return {
@@ -182,9 +187,26 @@ verify:
     const store = await openRunStore(cwd);
     const details = store.getRunDetails("run-test-123");
     store.close();
+    const runDirectory = join(cwd, ".codex-cage", "runs", "run-test-123");
+    const implementationPrompt = await readFile(
+      join(runDirectory, "implementation-prompt-1.md"),
+      "utf8",
+    );
+    const reviewPrompt = await readFile(join(runDirectory, "review-prompt-0.md"), "utf8");
+    const promptContext = await readFile(
+      join(runDirectory, "prompt-context.json"),
+      "utf8",
+    );
+    const instructions = await readFile(join(runDirectory, "instructions.md"), "utf8");
 
     assert.equal(details.run.status, "succeeded");
     assert.equal(details.run.prUrl, "https://github.com/jhowliu/codex-cage/pull/26");
+    assert.match(implementationPrompt, /Repository instructions:/);
+    assert.match(implementationPrompt, /Always write focused tests/);
+    assert.match(reviewIssueContext, /Repository instructions:/);
+    assert.match(reviewPrompt, /Verification summary:/);
+    assert.match(promptContext, /AGENTS\.md/);
+    assert.match(instructions, /Always write focused tests/);
     assert.deepEqual(
       details.phases.map((phase) => phase.name),
       ["preflight", "cloning", "implement", "verify", "review", "pr"],

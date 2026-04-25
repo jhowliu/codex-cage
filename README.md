@@ -33,6 +33,7 @@ codex-cage init
 This creates:
 
 - `.codex-cage.yml`
+- `.codex-cage/instructions.md`
 - `.codex-cage.env.example`
 - `.gitignore` entries for local Codex Cage runtime state
 
@@ -43,6 +44,8 @@ codex-cage init --dockerfile
 ```
 
 The generated verify command intentionally fails until replaced with the target repo's real test command.
+
+Codex Cage includes root-level repository instruction files in implementation and review prompts when they exist: `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, and `CLAUDE.md`. The injected instruction text is capped and saved as run artifacts with the rendered prompts.
 
 ## Inspect Local Runs
 

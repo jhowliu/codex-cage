@@ -32,12 +32,18 @@ import {
   type CommandRunner,
 } from "./publish.js";
 import {
+  buildPromptContext,
+  formatInstructionsForPrompt,
+  type PromptContext,
+} from "./prompt-context.js";
+import {
   createAuthenticatedRepo,
   resolveTargetRepo,
   type AuthenticatedRepo,
   type RepoResolution,
 } from "./repo.js";
 import {
+  buildReviewPrompt,
   runIndependentReview,
   type ReviewAgentRunner,
   ReviewModifiedDiffError,
@@ -102,6 +108,7 @@ type RuntimeContext = {
   runId: string;
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
+  promptContext: PromptContext;
 };
 
 type PhaseBody = () => Promise<string | undefined>;
@@ -137,6 +144,7 @@ export async function runCodexCage(
       branch: context.branchName,
     });
     await writeJsonArtifact(store, context.runId, "issue.json", context.issue);
+    await writePromptContextArtifacts(store, context);
     await writeJsonArtifact(store, context.runId, "resolved-config.json", {
       config: context.config,
       warnings: context.configWarnings,
@@ -336,6 +344,7 @@ async function prepareRuntimeContext(
     contextPath: "",
     source: "configured" as const,
   };
+  const promptContext = await buildPromptContext(cwd);
 
   return {
     cwd,
@@ -351,6 +360,7 @@ async function prepareRuntimeContext(
     runId,
     branchName,
     runtimeImage,
+    promptContext,
   };
 }
 
@@ -411,15 +421,22 @@ async function runImplementationLoop(input: {
   ) {
     await input.store.updateRunStatus(input.context.runId, { status: "implementing" });
     await runPhase(input.store, input.context.runId, "implement", async () => {
+      const prompt = buildImplementationPrompt({
+        context: input.context,
+        iteration,
+        feedback,
+      });
+      await input.store.writeArtifact(
+        input.context.runId,
+        `implementation-prompt-${iteration}.md`,
+        input.redactor(prompt),
+      );
+
       return await requiredShell(
         input.shell,
         codexExecCommand({
           model: input.context.model,
-          prompt: buildImplementationPrompt({
-            context: input.context,
-            iteration,
-            feedback,
-          }),
+          prompt,
         }),
         input.redactor,
       );
@@ -473,19 +490,32 @@ async function runImplementationLoop(input: {
       input.context.runId,
       "review",
       async () => {
+        const reviewIssueContext = formatReviewIssueContext(input.context);
+        const resultMetadata = {
+          runId: input.context.runId,
+          iteration,
+          repo: input.context.repoResolution.repo.fullName,
+        };
+        const reviewPrompt = buildReviewPrompt({
+          issueContext: reviewIssueContext,
+          verificationSummary: verification.summary,
+          resultMetadata,
+          diff,
+        });
+        await input.store.writeArtifact(
+          input.context.runId,
+          `review-prompt-${reviewCycle}.md`,
+          input.redactor(reviewPrompt),
+        );
         const result = await input.review({
           cwd: input.context.cwd,
           model: input.context.model,
           cycle: reviewCycle,
           maxReviewCycles: input.context.config.agent.max_review_cycles,
-          issueContext: formatIssueContext(input.context.issue),
+          issueContext: reviewIssueContext,
           diff,
           verificationSummary: verification.summary,
-          resultMetadata: {
-            runId: input.context.runId,
-            iteration,
-            repo: input.context.repoResolution.repo.fullName,
-          },
+          resultMetadata,
           readCurrentDiff: async () => await readCurrentDiff(input.shell),
           runner: reviewAgentRunner(input.shell),
           env: input.context.secrets,
@@ -769,12 +799,21 @@ Iteration: ${input.iteration}
 Repository: ${input.context.repoResolution.repo.fullName}
 Base branch: ${input.context.baseBranch}
 
+${formatInstructionsForPrompt(input.context.promptContext)}
+
 Issue:
 ${formatIssueContext(input.context.issue)}
 
 Feedback to address:
 ${feedback}
 `;
+}
+
+function formatReviewIssueContext(context: RuntimeContext): string {
+  return `${formatInstructionsForPrompt(context.promptContext)}
+
+Issue:
+${formatIssueContext(context.issue)}`;
 }
 
 function formatIssueContext(issue: IssueContext): string {
@@ -875,6 +914,25 @@ async function writeJsonArtifact(
   value: unknown,
 ): Promise<void> {
   await store.writeArtifact(runId, name, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function writePromptContextArtifacts(
+  store: RunStore,
+  context: RuntimeContext,
+): Promise<void> {
+  await writeJsonArtifact(store, context.runId, "prompt-context.json", {
+    instructionFiles: context.promptContext.instructionFiles,
+    limitBytes: context.promptContext.limitBytes,
+    truncated: context.promptContext.truncated,
+  });
+
+  if (context.promptContext.instructions !== "") {
+    await store.writeArtifact(
+      context.runId,
+      "instructions.md",
+      context.promptContext.instructions,
+    );
+  }
 }
 
 async function writeFailureSummary(

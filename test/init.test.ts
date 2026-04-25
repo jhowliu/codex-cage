@@ -15,7 +15,11 @@ test("init creates config, env example, and gitignore entries", async () => {
   try {
     const result = await initProject(cwd);
 
-    assert.deepEqual(result.created, [".codex-cage.yml", ".codex-cage.env.example"]);
+    assert.deepEqual(result.created, [
+      ".codex-cage.yml",
+      ".codex-cage/instructions.md",
+      ".codex-cage.env.example",
+    ]);
     assert.deepEqual(result.updated, [".gitignore"]);
 
     const config = await readFile(join(cwd, ".codex-cage.yml"), "utf8");
@@ -28,9 +32,39 @@ test("init creates config, env example, and gitignore entries", async () => {
     assert.match(envExample, /OPENAI_API_KEY=/);
     assert.match(envExample, /GITHUB_TOKEN=/);
 
+    const instructions = await readFile(
+      join(cwd, ".codex-cage", "instructions.md"),
+      "utf8",
+    );
+    assert.match(instructions, /Do not commit, push, create pull requests/);
+
     const gitignore = await readFile(join(cwd, ".gitignore"), "utf8");
     assert.match(gitignore, /\.codex-cage\.env/);
     assert.match(gitignore, /\.codex-cage\/runs\//);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("init leaves existing instructions untouched", async () => {
+  const cwd = await tempRepo();
+
+  try {
+    await mkdir(join(cwd, ".codex-cage"), { recursive: true });
+    await writeFile(
+      join(cwd, ".codex-cage", "instructions.md"),
+      "custom instructions\n",
+      "utf8",
+    );
+
+    const result = await initProject(cwd);
+    const instructions = await readFile(
+      join(cwd, ".codex-cage", "instructions.md"),
+      "utf8",
+    );
+
+    assert.equal(result.created.includes(".codex-cage/instructions.md"), false);
+    assert.equal(instructions, "custom instructions\n");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
