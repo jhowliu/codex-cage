@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { initProject } from "./init.js";
-import { runCodexCage } from "./run.js";
+import { runCodexCage, type RunProgressEvent } from "./run.js";
 import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
@@ -71,6 +71,11 @@ export function createCli(dependencies: CliDependencies = {}): Command {
             model: options.model,
             draft: options.draft,
           }),
+          {
+            onProgress: (event) => {
+              console.error(formatRunProgressEvent(event));
+            },
+          },
         );
 
         console.log(`Run: ${result.runId}`);
@@ -172,6 +177,31 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     });
 
   return program;
+}
+
+function formatRunProgressEvent(event: RunProgressEvent): string {
+  switch (event.type) {
+    case "run_started":
+      return [
+        `Run ${event.runId}`,
+        `Issue: ${event.issueKey} ${event.issueTitle}`,
+        `Repo: ${event.repo}`,
+        `Branch: ${event.branch}`,
+        `Artifacts: ${event.artifactDir}`,
+      ].join("\n");
+    case "iteration_started":
+      return `[iteration ${event.iteration}/${event.maxIterations}] implementing`;
+    case "phase_started":
+      return `[${event.phase}] started`;
+    case "phase_passed":
+      return `[${event.phase}] passed (${event.logPath})`;
+    case "phase_failed":
+      return `[${event.phase}] failed (${event.logPath})`;
+    case "run_finished":
+      return event.status === "succeeded"
+        ? `Run ${event.runId} succeeded${event.prUrl === null ? "" : `: ${event.prUrl}`}`
+        : `Run ${event.runId} failed: ${event.failureCode ?? "unknown"}`;
+  }
 }
 
 function removeUndefinedProperties<TValue extends Record<string, unknown>>(

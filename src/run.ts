@@ -74,6 +74,36 @@ export type RunCodexCageResult = {
   prUrl: string | null;
 };
 
+export type RunProgressEvent =
+  | {
+      type: "run_started";
+      runId: string;
+      issueKey: string;
+      issueTitle: string;
+      repo: string;
+      branch: string;
+      artifactDir: string;
+    }
+  | {
+      type: "phase_started" | "phase_passed" | "phase_failed";
+      runId: string;
+      phase: PhaseName;
+      logPath: string;
+    }
+  | {
+      type: "iteration_started";
+      runId: string;
+      iteration: number;
+      maxIterations: number;
+    }
+  | {
+      type: "run_finished";
+      runId: string;
+      status: "succeeded" | "failed";
+      failureCode: FailureCode | null;
+      prUrl: string | null;
+    };
+
 export type ShellRunner = {
   run(command: string): Promise<CommandResult>;
 };
@@ -95,6 +125,7 @@ export type RunCodexCageDependencies = {
   publishSuccessfulRun?: typeof publishSuccessfulRun;
   generateRunId?: () => string;
   findCodexAuthFile?: typeof findCodexAuthFile;
+  onProgress?: (event: RunProgressEvent) => void;
 };
 
 type RuntimeContext = {
@@ -132,6 +163,7 @@ export async function runCodexCage(
   const makeComposeProject = dependencies.createComposeProject ?? createComposeProject;
   const review = dependencies.runIndependentReview ?? runIndependentReview;
   const publish = dependencies.publishSuccessfulRun ?? publishSuccessfulRun;
+  const onProgress = dependencies.onProgress ?? (() => undefined);
   const redactor = createSecretRedactor(context.secrets);
   const store = await openStore(cwd);
   let sandbox: DockerSandbox | null = null;
@@ -147,6 +179,15 @@ export async function runCodexCage(
       baseBranch: context.baseBranch,
       branch: context.branchName,
     });
+    onProgress({
+      type: "run_started",
+      runId: context.runId,
+      issueKey: context.issue.identifier,
+      issueTitle: context.issue.title,
+      repo: context.repoResolution.repo.fullName,
+      branch: context.branchName,
+      artifactDir: store.runDirectory(context.runId),
+    });
     await writeJsonArtifact(store, context.runId, "issue.json", context.issue);
     await writePromptContextArtifacts(store, context);
     await writeJsonArtifact(store, context.runId, "resolved-config.json", {
@@ -156,7 +197,7 @@ export async function runCodexCage(
       runtimeImage: context.runtimeImage,
     });
 
-    await runPhase(store, context.runId, "preflight", async () => {
+    await runPhase(store, context.runId, "preflight", onProgress, async () => {
       return [
         `Issue: ${context.issue.identifier} ${context.issue.title}`,
         `Repo: ${context.repoResolution.repo.fullName}`,
@@ -173,6 +214,7 @@ export async function runCodexCage(
           store,
           context.runId,
           "runtime_image",
+          onProgress,
           async () => {
             const result = await buildImage({
               runId: context.runId,
@@ -216,7 +258,7 @@ export async function runCodexCage(
         readyCommands: context.config.services.ready,
       });
       try {
-        await runPhase(store, context.runId, "setup", async () => {
+        await runPhase(store, context.runId, "setup", onProgress, async () => {
           await compose?.up();
           await compose?.waitUntilReady();
           return "Compose services are ready.";
@@ -246,7 +288,7 @@ export async function runCodexCage(
     const shellRunner = shell;
 
     await store.updateRunStatus(context.runId, { status: "cloning" });
-    await runPhase(store, context.runId, "cloning", async () => {
+    await runPhase(store, context.runId, "cloning", onProgress, async () => {
       await sandbox?.create();
       await sandbox?.cloneRepository();
       const checkout = await requiredShell(
@@ -262,7 +304,7 @@ export async function runCodexCage(
     if (context.config.setup.length > 0) {
       await store.updateRunStatus(context.runId, { status: "setup" });
       try {
-        await runPhase(store, context.runId, "setup", async () => {
+        await runPhase(store, context.runId, "setup", onProgress, async () => {
           const logs: string[] = [];
           for (const command of context.config.setup) {
             logs.push(await requiredShell(shellRunner, command, redactor));
@@ -281,8 +323,16 @@ export async function runCodexCage(
       redactor,
       review,
       publish,
+      onProgress,
     });
 
+    onProgress({
+      type: "run_finished",
+      runId: runResult.runId,
+      status: runResult.status,
+      failureCode: runResult.failureCode,
+      prUrl: runResult.prUrl,
+    });
     return runResult;
   } catch (error) {
     const failureCode = failureCodeFromError(error);
@@ -293,12 +343,19 @@ export async function runCodexCage(
       finishedAt: new Date(),
     });
 
-    return {
+    const runResult: RunCodexCageResult = {
       runId: context.runId,
       status: "failed",
       failureCode,
       prUrl: null,
     };
+
+    onProgress({
+      type: "run_finished",
+      ...runResult,
+    });
+
+    return runResult;
   } finally {
     await cleanupRuntime(compose, sandbox);
     store.close();
@@ -439,6 +496,7 @@ async function runImplementationLoop(input: {
   redactor: (input: string) => string;
   review: typeof runIndependentReview;
   publish: typeof publishSuccessfulRun;
+  onProgress: (event: RunProgressEvent) => void;
 }): Promise<RunCodexCageResult> {
   const feedback: string[] = [];
   let reviewCycle = 0;
@@ -450,29 +508,41 @@ async function runImplementationLoop(input: {
     iteration <= input.context.config.agent.max_iterations;
     iteration += 1
   ) {
-    await input.store.updateRunStatus(input.context.runId, { status: "implementing" });
-    await runPhase(input.store, input.context.runId, "implement", async () => {
-      const prompt = buildImplementationPrompt({
-        context: input.context,
-        iteration,
-        feedback,
-      });
-      await input.store.writeArtifact(
-        input.context.runId,
-        `implementation-prompt-${iteration}.md`,
-        input.redactor(prompt),
-      );
-
-      return await requiredShell(
-        input.shell,
-        codexExecCommand({
-          model: input.context.model,
-          sandbox: "workspace-write",
-          prompt,
-        }),
-        input.redactor,
-      );
+    input.onProgress({
+      type: "iteration_started",
+      runId: input.context.runId,
+      iteration,
+      maxIterations: input.context.config.agent.max_iterations,
     });
+    await input.store.updateRunStatus(input.context.runId, { status: "implementing" });
+    await runPhase(
+      input.store,
+      input.context.runId,
+      "implement",
+      input.onProgress,
+      async () => {
+        const prompt = buildImplementationPrompt({
+          context: input.context,
+          iteration,
+          feedback,
+        });
+        await input.store.writeArtifact(
+          input.context.runId,
+          `implementation-prompt-${iteration}.md`,
+          input.redactor(prompt),
+        );
+
+        return await requiredShell(
+          input.shell,
+          codexExecCommand({
+            model: input.context.model,
+            sandbox: "workspace-write",
+            prompt,
+          }),
+          input.redactor,
+        );
+      },
+    );
 
     await input.store.updateRunStatus(input.context.runId, { status: "verifying" });
     const verification = await runVerificationCommands({
@@ -481,6 +551,7 @@ async function runImplementationLoop(input: {
       shell: input.shell,
       commands: input.context.config.verify,
       redactor: input.redactor,
+      onProgress: input.onProgress,
     });
 
     if (!verification.passed) {
@@ -521,6 +592,7 @@ async function runImplementationLoop(input: {
       input.store,
       input.context.runId,
       "review",
+      input.onProgress,
       async () => {
         const reviewIssueContext = formatReviewIssueContext(input.context);
         const resultMetadata = {
@@ -589,6 +661,7 @@ async function runImplementationLoop(input: {
       input.store,
       input.context.runId,
       "pr",
+      input.onProgress,
       async () => {
         let result;
 
@@ -661,14 +734,22 @@ async function runVerificationCommands(input: {
   shell: ShellRunner;
   commands: string[];
   redactor: (input: string) => string;
+  onProgress: (event: RunProgressEvent) => void;
 }): Promise<
   { passed: true; summary: string; items: string[] } | { passed: false; feedback: string }
 > {
   const items: string[] = [];
+  const logPath = input.store.artifactPath(input.runId, "verify.log");
+  input.onProgress({
+    type: "phase_started",
+    runId: input.runId,
+    phase: "verify",
+    logPath,
+  });
   const phase = await input.store.startPhase({
     runId: input.runId,
     name: "verify",
-    logPath: input.store.artifactPath(input.runId, "verify.log"),
+    logPath,
   });
   const logs: string[] = [];
 
@@ -683,7 +764,13 @@ async function runVerificationCommands(input: {
       await input.store.finishPhase({
         phaseId: phase.id,
         status: "failed",
-        logPath: input.store.artifactPath(input.runId, "verify.log"),
+        logPath,
+      });
+      input.onProgress({
+        type: "phase_failed",
+        runId: input.runId,
+        phase: "verify",
+        logPath,
       });
       return {
         passed: false,
@@ -699,7 +786,13 @@ async function runVerificationCommands(input: {
   await input.store.finishPhase({
     phaseId: phase.id,
     status: "passed",
-    logPath: input.store.artifactPath(input.runId, "verify.log"),
+    logPath,
+  });
+  input.onProgress({
+    type: "phase_passed",
+    runId: input.runId,
+    phase: "verify",
+    logPath,
   });
 
   return {
@@ -713,9 +806,11 @@ async function runPhase<TValue = undefined>(
   store: RunStore,
   runId: string,
   name: PhaseName,
+  onProgress: (event: RunProgressEvent) => void,
   body: PhaseBody | (() => Promise<{ log: string; value: TValue }>),
 ): Promise<TValue> {
   const logPath = store.artifactPath(runId, `${name}.log`);
+  onProgress({ type: "phase_started", runId, phase: name, logPath });
   const phase = await store.startPhase({ runId, name, logPath });
 
   try {
@@ -723,10 +818,12 @@ async function runPhase<TValue = undefined>(
     const log = normalizePhaseLog(result);
     await store.writeArtifact(runId, `${name}.log`, log);
     await store.finishPhase({ phaseId: phase.id, status: "passed", logPath });
+    onProgress({ type: "phase_passed", runId, phase: name, logPath });
     return extractPhaseValue(result);
   } catch (error) {
     await store.writeArtifact(runId, `${name}.log`, formatError(error));
     await store.finishPhase({ phaseId: phase.id, status: "failed", logPath });
+    onProgress({ type: "phase_failed", runId, phase: name, logPath });
     throw error;
   }
 }
