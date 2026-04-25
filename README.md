@@ -2,7 +2,7 @@
 
 Codex Cage is a lightweight CLI for running Codex against issue-driven work in an isolated Docker workspace. The CLI can initialize target repos, run the issue-driven orchestration loop, inspect local run metadata, and clean up managed Docker resources.
 
-Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
+Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md). Read [docs/security.md](docs/security.md) before running Codex Cage on a repository; Codex Cage is not a general sandbox for untrusted code.
 
 ## Current Commands
 
