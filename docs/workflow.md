@@ -60,6 +60,7 @@ codex-cage init
 This creates:
 
 - `.codex-cage.yml`
+- `.codex-cage/instructions.md`
 - `.codex-cage.env.example`
 - `.gitignore` entries for `.codex-cage.env`, run artifacts, and SQLite metadata
 
@@ -115,6 +116,24 @@ guards:
 `verify` must contain at least one command. The generated default intentionally fails until replaced with the target repo's real validation command.
 
 `runtime.image` accepts any valid Docker image reference and defaults to the Codex Cage GHCR base image. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image before cloning the target repository. The first version uses `.codex-cage/` as the Docker build context, so target runtime Dockerfiles should keep package-install inputs inside that directory.
+
+## Prompt Instructions
+
+Codex Cage injects root-level repository instruction files into implementation and review prompts when they exist:
+
+- `AGENTS.md`
+- `.codex-cage/instructions.md`
+- `.github/copilot-instructions.md`
+- `CLAUDE.md`
+
+Instruction injection is capped at 32 KB total. Missing files are omitted from prompts but recorded in `prompt-context.json`. Codex Cage does not inject README excerpts or raw `.codex-cage.yml` content.
+
+Each run records prompt context artifacts under `.codex-cage/runs/<run-id>`:
+
+- `prompt-context.json`
+- `instructions.md` when any instructions were included
+- `implementation-prompt-<iteration>.md`
+- `review-prompt-<cycle>.md`
 
 ## Running GitHub Issues
 
