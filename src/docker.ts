@@ -26,6 +26,7 @@ export type DockerSandboxOptions = {
   serviceNetworkName?: string;
   labels?: Record<string, string>;
   env?: Record<string, string>;
+  codexAuthFilePath?: string | undefined;
 };
 
 export type DockerSandbox = {
@@ -35,6 +36,7 @@ export type DockerSandbox = {
   networkName: string;
   ownedNetworkName: string | null;
   workspacePath: string;
+  codexAuthFilePath: string | null;
   create(): Promise<void>;
   cloneRepository(): Promise<void>;
   runCommand(command: string): Promise<void>;
@@ -125,6 +127,7 @@ export function createDockerSandbox(
     networkName: agentNetworkName,
     ownedNetworkName,
     workspacePath,
+    codexAuthFilePath: options.codexAuthFilePath ?? null,
     async create(): Promise<void> {
       await runner.run(volumeCreateArgs(volumeName, labels));
       if (ownedNetworkName !== null) {
@@ -140,6 +143,7 @@ export function createDockerSandbox(
           workspacePath,
           labels,
           env: options.env ?? {},
+          codexAuthFilePath: options.codexAuthFilePath,
           command: `git clone ${shellQuote(options.cloneUrl)} .`,
         }),
         { env: options.env ?? {} },
@@ -154,6 +158,7 @@ export function createDockerSandbox(
           workspacePath,
           labels,
           env: options.env ?? {},
+          codexAuthFilePath: options.codexAuthFilePath,
           command,
         }),
         { env: options.env ?? {} },
@@ -318,6 +323,7 @@ type DockerRunArgsInput = {
   workspacePath: string;
   labels: Record<string, string>;
   env: Record<string, string>;
+  codexAuthFilePath?: string | undefined;
   command: string;
 };
 
@@ -334,12 +340,41 @@ export function dockerRunArgs(input: DockerRunArgsInput): string[] {
     input.workspacePath,
     "--user",
     "agent",
+    ...codexAuthMountArgs(input.codexAuthFilePath),
     ...envArgs(input.env),
     input.image,
     "sh",
     "-lc",
-    input.command,
+    commandWithCodexAuth(input.command, input.codexAuthFilePath),
   ];
+}
+
+function codexAuthMountArgs(codexAuthFilePath: string | undefined): string[] {
+  if (codexAuthFilePath === undefined) {
+    return [];
+  }
+
+  return [
+    "--mount",
+    `type=bind,source=${codexAuthFilePath},target=/tmp/codex-auth.json,readonly`,
+  ];
+}
+
+function commandWithCodexAuth(
+  command: string,
+  codexAuthFilePath: string | undefined,
+): string {
+  if (codexAuthFilePath === undefined) {
+    return command;
+  }
+
+  return [
+    'if [ -f /tmp/codex-auth.json ] && [ -z "${OPENAI_API_KEY:-}" ]; then mkdir -p /home/agent/.codex',
+    "cp /tmp/codex-auth.json /home/agent/.codex/auth.json",
+    "chmod 600 /home/agent/.codex/auth.json",
+    "fi",
+    command,
+  ].join("; ");
 }
 
 function labelArgs(labels: Record<string, string>): string[] {

@@ -138,7 +138,7 @@ Each run records prompt context artifacts under `.codex-cage/runs/<run-id>`:
 ## Running GitHub Issues
 
 ```bash
-codex-cage run --issue https://github.com/OWNER/REPO/issues/123
+codex-cage run https://github.com/OWNER/REPO/issues/123
 ```
 
 GitHub issue URLs infer the target repository. If the current directory has a different GitHub origin, Codex Cage fails unless `--repo OWNER/REPO` is passed explicitly.
@@ -148,7 +148,7 @@ Successful runs create one branch, one commit, one push, and one ready PR. GitHu
 ## Running Linear Issues
 
 ```bash
-codex-cage run --issue https://linear.app/ORG/issue/ENG-123/title --repo OWNER/REPO
+codex-cage run https://linear.app/ORG/issue/ENG-123/title --repo OWNER/REPO
 ```
 
 Linear issue URLs provide issue context but do not infer a GitHub repo. Use `--repo`, or run from a directory with a GitHub `origin` remote. Codex Cage links the Linear issue in the PR body but does not mutate Linear.

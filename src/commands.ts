@@ -5,8 +5,13 @@ import { runCodexCage } from "./run.js";
 import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
-export function createCli(): Command {
+export type CliDependencies = {
+  runCodexCage?: typeof runCodexCage;
+};
+
+export function createCli(dependencies: CliDependencies = {}): Command {
   const program = new Command();
+  const run = dependencies.runCodexCage ?? runCodexCage;
 
   program
     .name("codex-cage")
@@ -34,22 +39,33 @@ export function createCli(): Command {
   program
     .command("run")
     .description("Run Codex Cage for a GitHub or Linear issue URL.")
-    .requiredOption("--issue <url>", "GitHub or Linear issue URL")
+    .argument("[issue-url]", "GitHub or Linear issue URL")
+    .option("--issue <url>", "GitHub or Linear issue URL")
     .option("--repo <repo>", "target GitHub repository override")
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
     .action(
-      async (options: {
-        issue: string;
-        repo?: string;
-        base?: string;
-        model?: string;
-        draft?: boolean;
-      }) => {
-        const result = await runCodexCage(
+      async (
+        issueArgument: string | undefined,
+        options: {
+          issue?: string;
+          repo?: string;
+          base?: string;
+          model?: string;
+          draft?: boolean;
+        },
+        command: Command,
+      ) => {
+        const issueUrl = options.issue ?? issueArgument;
+
+        if (issueUrl === undefined) {
+          command.error("error: missing required issue URL");
+        }
+
+        const result = await run(
           removeUndefinedProperties({
-            issueUrl: options.issue,
+            issueUrl,
             repo: options.repo,
             base: options.base,
             model: options.model,

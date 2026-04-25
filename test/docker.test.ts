@@ -113,6 +113,33 @@ test("dockerRunArgs uses volume workspace and avoids host-sensitive mounts", () 
   assert.deepEqual(args.slice(-3), ["sh", "-lc", "npm test"]);
 });
 
+test("dockerRunArgs can mount only the Codex auth file for OAuth fallback", () => {
+  const args = dockerRunArgs({
+    image: defaultSandboxImage,
+    networkName: "codex-cage-run-1",
+    volumeName: "codex-cage-run-1-workspace",
+    workspacePath: "/workspace",
+    labels: { "codex-cage.run_id": "run-1" },
+    env: { GITHUB_TOKEN: "secret" },
+    codexAuthFilePath: "/Users/example/.codex/auth.json",
+    command: "codex exec hello",
+  });
+  const joinedArgs = args.join(" ");
+
+  assert.equal(
+    joinedArgs.includes(
+      "--mount type=bind,source=/Users/example/.codex/auth.json,target=/tmp/codex-auth.json,readonly",
+    ),
+    true,
+  );
+  assert.equal(joinedArgs.includes("target=/home/agent/.codex"), false);
+  assert.equal(joinedArgs.includes(".config/gh"), false);
+  assert.equal((args.at(-1) ?? "").includes("then;"), false);
+  assert.match(args.at(-1) ?? "", /cp \/tmp\/codex-auth\.json/);
+  assert.match(args.at(-1) ?? "", /codex exec hello/);
+  assert.equal(joinedArgs.includes("secret"), false);
+});
+
 test("dockerBuildArgs labels per-run runtime images", () => {
   assert.deepEqual(
     dockerBuildArgs({
