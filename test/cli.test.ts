@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createCli } from "../src/commands.js";
+import type { RunCommandOptions, RunCodexCageResult } from "../src/run.js";
 import { openRunStore } from "../src/state.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +45,82 @@ test("command help is available for commands", () => {
     assert.equal(result.status, 0, command.join(" "));
     assert.match(result.stdout, /Usage:/);
   }
+});
+
+test("run accepts a positional issue URL", async () => {
+  const calls: RunCommandOptions[] = [];
+  const originalConsoleLog = console.log;
+  const program = createCli({
+    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+      calls.push(input);
+      return {
+        runId: "run-cli-test",
+        status: "failed",
+        failureCode: null,
+        prUrl: null,
+      };
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = () => undefined;
+
+  try {
+    await program.parseAsync(
+      [
+        "run",
+        "https://github.com/jhowliu/codex-cage/issues/35",
+        "--repo",
+        "jhowliu/codex-cage",
+      ],
+      { from: "user" },
+    );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
+      repo: "jhowliu/codex-cage",
+    },
+  ]);
+});
+
+test("run keeps the --issue option for compatibility", async () => {
+  const calls: RunCommandOptions[] = [];
+  const originalConsoleLog = console.log;
+  const program = createCli({
+    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+      calls.push(input);
+      return {
+        runId: "run-cli-test",
+        status: "failed",
+        failureCode: null,
+        prUrl: null,
+      };
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = () => undefined;
+
+  try {
+    await program.parseAsync(
+      ["run", "--issue", "https://github.com/jhowliu/codex-cage/issues/35"],
+      { from: "user" },
+    );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
+    },
+  ]);
 });
 
 test("runs list and show read local run metadata", async () => {

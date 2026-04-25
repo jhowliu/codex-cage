@@ -54,6 +54,7 @@ function fakeSandbox(events: string[]): DockerSandbox {
     networkName: "fake-network",
     ownedNetworkName: "fake-network",
     workspacePath: "/workspace",
+    codexAuthFilePath: null,
     async create(): Promise<void> {
       events.push("sandbox:create");
     },
@@ -137,7 +138,8 @@ verify:
       },
       {
         generateRunId: () => "run-test-123",
-        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value", OPENAI_API_KEY: "" }),
+        findCodexAuthFile: async () => "/host/.codex/auth.json",
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
@@ -181,6 +183,7 @@ verify:
       GH_TOKEN: "token-value",
       GITHUB_TOKEN: "token-value",
     });
+    assert.equal(sandboxOptions[0]?.codexAuthFilePath, "/host/.codex/auth.json");
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
 
@@ -205,6 +208,10 @@ verify:
     assert.match(implementationPrompt, /Always write focused tests/);
     assert.match(reviewIssueContext, /Repository instructions:/);
     assert.match(reviewPrompt, /Verification summary:/);
+    assert.match(
+      shell.commands.find((command) => command.includes("codex exec")) ?? "",
+      /--sandbox 'workspace-write'/,
+    );
     assert.match(promptContext, /AGENTS\.md/);
     assert.match(instructions, /Always write focused tests/);
     assert.deepEqual(
@@ -251,6 +258,7 @@ runtime:
       {
         generateRunId: () => "run-image-123",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
@@ -330,6 +338,7 @@ runtime:
       {
         generateRunId: () => "run-image-failed",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
@@ -394,6 +403,7 @@ agent:
       {
         generateRunId: () => "run-test-failed",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({

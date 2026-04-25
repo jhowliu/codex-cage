@@ -1,5 +1,7 @@
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { constants } from "node:fs";
+import { access, readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { execa } from "execa";
 import YAML from "yaml";
 import {
@@ -92,6 +94,7 @@ export type RunCodexCageDependencies = {
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
   generateRunId?: () => string;
+  findCodexAuthFile?: typeof findCodexAuthFile;
 };
 
 type RuntimeContext = {
@@ -109,6 +112,7 @@ type RuntimeContext = {
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
   promptContext: PromptContext;
+  codexAuthFilePath: string | null;
 };
 
 type PhaseBody = () => Promise<string | undefined>;
@@ -229,6 +233,10 @@ export async function runCodexCage(
       env: context.secrets,
     };
 
+    if (context.codexAuthFilePath !== null) {
+      sandboxOptions.codexAuthFilePath = context.codexAuthFilePath;
+    }
+
     if (compose !== null) {
       sandboxOptions.serviceNetworkName = compose.networkName;
     }
@@ -308,6 +316,7 @@ async function prepareRuntimeContext(
   const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
   const authenticateRepo =
     dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
+  const locateCodexAuthFile = dependencies.findCodexAuthFile ?? findCodexAuthFile;
   const secrets = normalizeRuntimeEnv(await readEnv(cwd));
   const issueOptions: Parameters<typeof fetchIssueContext>[1] = {
     comments: configResult.config.issue.comments,
@@ -345,6 +354,8 @@ async function prepareRuntimeContext(
     source: "configured" as const,
   };
   const promptContext = await buildPromptContext(cwd);
+  const codexAuthFilePath =
+    secrets.OPENAI_API_KEY === undefined ? await locateCodexAuthFile() : null;
 
   return {
     cwd,
@@ -361,6 +372,7 @@ async function prepareRuntimeContext(
     branchName,
     runtimeImage,
     promptContext,
+    codexAuthFilePath,
   };
 }
 
@@ -391,14 +403,33 @@ async function readConfig(cwd: string): Promise<{
 }
 
 function normalizeRuntimeEnv(env: Record<string, string>): Record<string, string> {
-  if (env.GITHUB_TOKEN === undefined || env.GH_TOKEN !== undefined) {
-    return env;
+  const nonEmptyEnv = Object.fromEntries(
+    Object.entries(env).filter(([, value]) => value.trim() !== ""),
+  );
+
+  if (nonEmptyEnv.GITHUB_TOKEN === undefined || nonEmptyEnv.GH_TOKEN !== undefined) {
+    return nonEmptyEnv;
   }
 
   return {
-    ...env,
-    GH_TOKEN: env.GITHUB_TOKEN,
+    ...nonEmptyEnv,
+    GH_TOKEN: nonEmptyEnv.GITHUB_TOKEN,
   };
+}
+
+async function findCodexAuthFile(): Promise<string | null> {
+  const authFilePath = join(homedir(), ".codex", "auth.json");
+
+  try {
+    await access(authFilePath, constants.R_OK);
+    return authFilePath;
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "EACCES")) {
+      return null;
+    }
+
+    throw error;
+  }
 }
 
 async function runImplementationLoop(input: {
@@ -436,6 +467,7 @@ async function runImplementationLoop(input: {
         input.shell,
         codexExecCommand({
           model: input.context.model,
+          sandbox: "workspace-write",
           prompt,
         }),
         input.redactor,
@@ -714,6 +746,7 @@ function createDockerShellRunner(
           workspacePath: sandbox.workspacePath,
           labels: { "codex-cage.run_id": sandbox.runId },
           env,
+          codexAuthFilePath: sandbox.codexAuthFilePath ?? undefined,
           command,
         }),
         {
@@ -744,7 +777,11 @@ function reviewAgentRunner(shell: ShellRunner): ReviewAgentRunner {
     async run(input): Promise<string> {
       return await requiredShell(
         shell,
-        codexExecCommand({ model: input.model, prompt: input.prompt }),
+        codexExecCommand({
+          model: input.model,
+          sandbox: "read-only",
+          prompt: input.prompt,
+        }),
       );
     },
   };
@@ -840,8 +877,19 @@ ${comments}
 `;
 }
 
-function codexExecCommand(input: { model: string; prompt: string }): string {
-  return `codex exec --model ${shellQuote(input.model)} ${shellQuote(input.prompt)}`;
+function codexExecCommand(input: {
+  model: string;
+  sandbox: "read-only" | "workspace-write";
+  prompt: string;
+}): string {
+  return [
+    "codex exec",
+    "--model",
+    shellQuote(input.model),
+    "--sandbox",
+    shellQuote(input.sandbox),
+    shellQuote(input.prompt),
+  ].join(" ");
 }
 
 function generateRunId(): string {
