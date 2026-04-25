@@ -1,7 +1,11 @@
 import { execa } from "execa";
 
 export type DockerRunner = {
-  run: (args: string[]) => Promise<void>;
+  run: (args: string[], options?: DockerRunOptions) => Promise<void>;
+};
+
+export type DockerRunOptions = {
+  env?: Record<string, string>;
 };
 
 export type DockerSandboxOptions = {
@@ -38,8 +42,13 @@ export const defaultWorkspacePath = "/workspace";
 const runIdLabelName = "codex-cage.run_id";
 
 export const execaDockerRunner: DockerRunner = {
-  async run(args: string[]): Promise<void> {
-    await execa("docker", args, { stdio: "inherit" });
+  async run(args: string[], options: DockerRunOptions = {}): Promise<void> {
+    if (options.env === undefined) {
+      await execa("docker", args, { stdio: "inherit" });
+      return;
+    }
+
+    await execa("docker", args, { env: options.env, stdio: "inherit" });
   },
 };
 
@@ -81,6 +90,7 @@ export function createDockerSandbox(
           env: options.env ?? {},
           command: `git clone ${shellQuote(options.cloneUrl)} .`,
         }),
+        { env: options.env ?? {} },
       );
     },
     async runCommand(command: string): Promise<void> {
@@ -94,6 +104,7 @@ export function createDockerSandbox(
           env: options.env ?? {},
           command,
         }),
+        { env: options.env ?? {} },
       );
     },
     async cleanup(): Promise<void> {
