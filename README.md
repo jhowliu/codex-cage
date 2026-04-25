@@ -14,7 +14,13 @@ codex-cage runs show <run-id>
 codex-cage cleanup
 ```
 
-Only `init` is implemented right now. Other commands are routed and documented in help output, but return a not-implemented error.
+Implemented commands:
+
+- `init`
+- `runs list`
+- `runs show`
+
+Other commands are routed and documented in help output, but return a not-implemented error.
 
 ## Initialize a Target Repo
 
@@ -35,6 +41,15 @@ codex-cage init --dockerfile
 ```
 
 The generated verify command intentionally fails until replaced with the target repo's real test command.
+
+## Inspect Local Runs
+
+```bash
+codex-cage runs list
+codex-cage runs show <run-id>
+```
+
+Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such as logs, patches, issue payloads, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
 
 ## Development
 

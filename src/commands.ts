@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { initProject } from "./init.js";
+import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
 type CommandHandler = () => Promise<void> | void;
@@ -51,13 +52,76 @@ export function createCli(): Command {
   runs
     .command("list")
     .description("List known runs from local metadata.")
-    .action(notImplemented("runs list"));
+    .action(async () => {
+      const store = await openRunStore(process.cwd());
+
+      try {
+        const runs = store.listRuns();
+
+        if (runs.length === 0) {
+          console.log("No runs found.");
+          return;
+        }
+
+        for (const run of runs) {
+          const details = [
+            run.id,
+            run.issueKey,
+            run.status,
+            run.failureCode ?? "-",
+            run.prUrl ?? "-",
+          ];
+
+          console.log(details.join("  "));
+        }
+      } finally {
+        store.close();
+      }
+    });
 
   runs
     .command("show")
     .description("Show metadata and artifact paths for a run.")
     .argument("<run-id>", "run id")
-    .action(notImplemented("runs show"));
+    .action(async (runId: string) => {
+      const store = await openRunStore(process.cwd());
+
+      try {
+        const details = store.getRunDetails(runId);
+
+        console.log(`Run: ${details.run.id}`);
+        console.log(`Status: ${details.run.status}`);
+        console.log(`Failure: ${details.run.failureCode ?? "-"}`);
+        console.log(`Issue: ${details.run.issueKey}`);
+        console.log(`Repo: ${details.run.repo}`);
+        console.log(`Base: ${details.run.baseBranch}`);
+        console.log(`Branch: ${details.run.branch}`);
+
+        if (details.run.prUrl !== null) {
+          console.log(`PR: ${details.run.prUrl}`);
+        }
+
+        console.log("");
+        console.log("Phases:");
+
+        if (details.phases.length === 0) {
+          console.log("  none");
+        } else {
+          for (const phase of details.phases) {
+            console.log(`  ${phase.name}  ${phase.status}  ${phase.logPath ?? "-"}`);
+          }
+        }
+
+        console.log("");
+        console.log("Artifacts:");
+
+        for (const [name, path] of Object.entries(details.artifacts)) {
+          console.log(`  ${name}: ${path}`);
+        }
+      } finally {
+        store.close();
+      }
+    });
 
   program
     .command("cleanup")
