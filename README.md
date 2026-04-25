@@ -128,7 +128,7 @@ Review is read-only. If the diff changes during review, the run fails instead of
 
 Successful runs are published by the orchestrator, not by the implementation or review agents. Codex Cage rejects empty diffs, creates a run-specific branch, configures the Codex Cage git author, commits once, pushes without force, and creates a ready GitHub PR by default.
 
-PR bodies include the summary, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
+PR bodies include the summary, dependency changes, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear. Dependency manifest and lockfile changes are allowed by default and are also recorded in `dependency-changes.json` run artifacts when present.
 
 ## Cleanup
 

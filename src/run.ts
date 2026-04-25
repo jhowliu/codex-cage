@@ -11,6 +11,10 @@ import {
 } from "./compose.js";
 import { parseCodexCageConfig, type CodexCageConfig } from "./config.js";
 import {
+  classifyDependencyChanges,
+  formatDependencyChangesMarkdown,
+} from "./dependencies.js";
+import {
   buildRuntimeImage,
   createDockerSandbox,
   dockerRunArgs,
@@ -561,6 +565,7 @@ async function runImplementationLoop(input: {
     }
 
     const diff = await readCurrentDiff(input.shell);
+    const dependencyChanges = classifyDependencyChanges(diff);
     const violations = scanDiffForGuardViolations(diff, {
       injectedSecrets: input.context.secrets,
     });
@@ -599,6 +604,7 @@ async function runImplementationLoop(input: {
           runId: input.context.runId,
           iteration,
           repo: input.context.repoResolution.repo.fullName,
+          dependencyChanges,
         };
         const reviewPrompt = buildReviewPrompt({
           issueContext: reviewIssueContext,
@@ -681,6 +687,7 @@ async function runImplementationLoop(input: {
               verification: verification.items,
               reviewStatus: "Independent review passed.",
               risks: [],
+              dependencyChanges,
             },
             git: shellCommandRunner(input.shell, "git"),
             gh: shellCommandRunner(input.shell, "gh"),
@@ -701,15 +708,19 @@ async function runImplementationLoop(input: {
     );
 
     await writeJsonArtifact(input.store, input.context.runId, "pr.json", publishResult);
-    await input.store.writeArtifact(
+    await writeJsonArtifact(
+      input.store,
       input.context.runId,
-      "final.patch",
-      await readCurrentDiff(input.shell),
+      "dependency-changes.json",
+      dependencyChanges,
     );
+    await input.store.writeArtifact(input.context.runId, "final.patch", diff);
     await input.store.writeArtifact(
       input.context.runId,
       "summary.md",
-      `# ${input.context.runId}\n\nPR: ${publishResult.prUrl}\n`,
+      `# ${input.context.runId}\n\nPR: ${publishResult.prUrl}\n\n## Dependency Changes\n${formatDependencyChangesMarkdown(
+        dependencyChanges,
+      )}\n`,
     );
     await input.store.updateRunStatus(input.context.runId, {
       status: "succeeded",

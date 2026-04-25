@@ -93,11 +93,32 @@ test("formatPrBody includes summary, verification, review, risks, run id, and Gi
   const body = formatPrBody({ issue: githubIssue, metadata });
 
   assert.match(body, /## Summary\nImplemented publish flow/);
+  assert.match(body, /## Dependency Changes\n- None detected\./);
   assert.match(body, /- npm test/);
   assert.match(body, /Independent review passed/);
   assert.match(body, /GitHub API unavailable/);
   assert.match(body, /Run ID: run-1234567890abcdef/);
   assert.match(body, /Closes #11/);
+});
+
+test("formatPrBody surfaces dependency manifest and lockfile changes", () => {
+  const body = formatPrBody({
+    issue: githubIssue,
+    metadata: {
+      ...metadata,
+      dependencyChanges: {
+        changed: true,
+        files: [
+          { path: "package.json", kind: "manifest" },
+          { path: "package-lock.json", kind: "lockfile" },
+        ],
+      },
+    },
+  });
+
+  assert.match(body, /## Dependency Changes/);
+  assert.match(body, /- `package\.json` \(manifest\)/);
+  assert.match(body, /- `package-lock\.json` \(lockfile\)/);
 });
 
 test("formatIssueLinkage links Linear issues without closing or mutating them", () => {

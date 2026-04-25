@@ -145,6 +145,8 @@ GitHub issue URLs infer the target repository. If the current directory has a di
 
 Successful runs create one branch, one commit, one push, and one ready PR. GitHub issue PR bodies include a closing keyword such as `Closes #123`, so GitHub closes the issue only after PR merge.
 
+Dependency manifest and lockfile changes are allowed by default. When the final diff changes `package.json`, `package-lock.json`, `pnpm-lock.yaml`, or `yarn.lock`, Codex Cage surfaces those files in the PR body and writes `dependency-changes.json` alongside the run artifacts. The configured `setup` and `verify` commands remain responsible for install and validation policy, such as running `npm install`, `npm test`, or stricter project-specific checks.
+
 ## Running Linear Issues
 
 ```bash

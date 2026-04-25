@@ -1,4 +1,8 @@
 import { execa } from "execa";
+import {
+  formatDependencyChangesMarkdown,
+  type DependencyChangeSummary,
+} from "./dependencies.js";
 import type { IssueContext } from "./issue.js";
 import type { GithubRepo } from "./repo.js";
 
@@ -22,6 +26,7 @@ export type PublishMetadata = {
   verification: string[];
   reviewStatus: string;
   risks: string[];
+  dependencyChanges?: DependencyChangeSummary | undefined;
 };
 
 export type PublishSuccessfulRunInput = {
@@ -227,6 +232,9 @@ export function formatPrBody(input: {
   return `## Summary
 ${input.metadata.summary}
 
+## Dependency Changes
+${formatDependencyChangesMarkdown(input.metadata.dependencyChanges ?? emptyDependencyChanges)}
+
 ## Verification
 ${verification}
 
@@ -243,6 +251,11 @@ ${risks}
 ${formatIssueLinkage(input.issue)}
 `;
 }
+
+const emptyDependencyChanges: DependencyChangeSummary = {
+  changed: false,
+  files: [],
+};
 
 export function formatIssueLinkage(issue: IssueContext): string {
   if (issue.source === "github") {

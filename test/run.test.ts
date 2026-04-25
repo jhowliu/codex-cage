@@ -197,6 +197,10 @@ verify:
 @@ -1 +1,2 @@
  export const ok = true;
 +export const changed = true;
+diff --git a/package.json b/package.json
+@@ -1 +1,2 @@
+ {}
++{"dependencies":{"left-pad":"1.3.0"}}
 `),
       ],
     ]),
@@ -260,6 +264,10 @@ verify:
     assert.equal(sandboxOptions[0]?.codexAuthFilePath, "/host/.codex/auth.json");
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
+    assert.deepEqual(published[0]?.metadata.dependencyChanges, {
+      changed: true,
+      files: [{ path: "package.json", kind: "manifest" }],
+    });
 
     const store = await openRunStore(cwd);
     const details = store.getRunDetails("run-test-123");
@@ -275,6 +283,11 @@ verify:
       "utf8",
     );
     const instructions = await readFile(join(runDirectory, "instructions.md"), "utf8");
+    const dependencyChanges = await readFile(
+      join(runDirectory, "dependency-changes.json"),
+      "utf8",
+    );
+    const summary = await readFile(join(runDirectory, "summary.md"), "utf8");
 
     assert.equal(details.run.status, "succeeded");
     assert.equal(details.run.prUrl, "https://github.com/jhowliu/codex-cage/pull/26");
@@ -288,6 +301,16 @@ verify:
     );
     assert.match(promptContext, /AGENTS\.md/);
     assert.match(instructions, /Always write focused tests/);
+    assert.deepEqual(JSON.parse(dependencyChanges), {
+      changed: true,
+      files: [{ path: "package.json", kind: "manifest" }],
+    });
+    assert.match(summary, /## Dependency Changes/);
+    assert.match(summary, /`package\.json` \(manifest\)/);
+    assert.equal(
+      details.artifacts["dependencyChanges"]?.endsWith("dependency-changes.json"),
+      true,
+    );
     assert.deepEqual(
       details.phases.map((phase) => phase.name),
       ["preflight", "cloning", "implement", "verify", "review", "pr"],

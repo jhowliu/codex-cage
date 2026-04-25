@@ -486,6 +486,7 @@ function defaultArtifactPaths(store: RunStore, runId: string): Record<string, st
     summary: store.artifactPath(runId, "summary.md"),
     issue: store.artifactPath(runId, "issue.json"),
     resolvedConfig: store.artifactPath(runId, "resolved-config.json"),
+    dependencyChanges: store.artifactPath(runId, "dependency-changes.json"),
     finalPatch: store.artifactPath(runId, "final.patch"),
     pr: store.artifactPath(runId, "pr.json"),
   };
