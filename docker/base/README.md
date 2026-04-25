@@ -5,7 +5,7 @@ The base image is the minimal runtime for Codex Cage agent containers.
 Published image:
 
 ```text
-ghcr.io/jhowliu/codex-cage/base:0.1.0
+ghcr.io/jhowliu/codex-cage/base:0.1.1
 ```
 
 The CLI should use immutable version tags for reproducible runs. The `latest` tag is published only as a manual testing convenience.
@@ -44,4 +44,4 @@ ghcr.io/jhowliu/codex-cage/base:<version>
 ghcr.io/jhowliu/codex-cage/base:latest
 ```
 
-Publishing is available through manual workflow dispatch and tags shaped like `base-v0.1.0`.
+Publishing is available through manual workflow dispatch and tags shaped like `base-v0.1.1`. Published images include `linux/amd64` and `linux/arm64` manifests.

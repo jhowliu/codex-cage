@@ -91,7 +91,7 @@ Codex Cage prepares disposable Docker resources per run:
 
 - A labeled Docker volume for `/workspace`
 - A labeled Docker network for run-local connectivity
-- An agent container using the pinned default image `ghcr.io/jhowliu/codex-cage/base:0.1.0`
+- An agent container using the pinned default image `ghcr.io/jhowliu/codex-cage/base:0.1.1`
 
 The sandbox runs as the non-root `agent` user, clones the target repo into the volume, and does not bind mount the host working tree, Docker socket, SSH config, GitHub CLI config, or host ports.
 
