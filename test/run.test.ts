@@ -104,6 +104,80 @@ function passingReview(): RunIndependentReviewResult {
   };
 }
 
+test("runCodexCage parses review agent stdout without command log noise", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+`);
+  const events: string[] = [];
+  const reviewJson = JSON.stringify({
+    decision: "pass",
+    summary: "No blocking issues.",
+    findings: [],
+  });
+  const diff = `diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`;
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      ["--sandbox 'workspace-write'", commandResult("implemented")],
+      ["--sandbox 'read-only'", commandResult(reviewJson)],
+      ["npm test", commandResult("tests passed")],
+      ["git add --intent-to-add", commandResult(diff)],
+    ]),
+  );
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-review-stdout",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl:
+            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl:
+            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+        publishSuccessfulRun: async (input) => ({
+          branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+          commitMessage: "#26 Wire run command",
+          prTitle: "#26 Wire run command",
+          prBody: "body",
+          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+        }),
+      },
+    );
+
+    const reviewLog = await readFile(
+      join(cwd, ".codex-cage", "runs", "run-review-stdout", "review.log"),
+      "utf8",
+    );
+
+    assert.equal(result.status, "succeeded");
+    assert.doesNotMatch(reviewLog, /^\$ printf/);
+    assert.deepEqual(JSON.parse(reviewLog), {
+      decision: "pass",
+      summary: "No blocking issues.",
+      findings: [],
+    });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runCodexCage executes the happy path and records a successful run", async () => {
   const cwd = await createProject(`
 verify:

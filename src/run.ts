@@ -877,15 +877,19 @@ function reviewAgentRunner(shell: ShellRunner): ReviewAgentRunner {
         JSON.stringify(input.outputSchema),
       )} > ${shellQuote(outputSchemaPath)}`;
 
-      return await requiredShell(
-        shell,
-        `${writeOutputSchemaCommand} && ${codexExecCommand({
-          model: input.model,
-          sandbox: "read-only",
-          outputSchemaPath,
-          prompt: input.prompt,
-        })}`,
-      );
+      const command = `${writeOutputSchemaCommand} && ${codexExecCommand({
+        model: input.model,
+        sandbox: "read-only",
+        outputSchemaPath,
+        prompt: input.prompt,
+      })}`;
+      const result = await shell.run(command);
+
+      if (result.exitCode !== 0) {
+        throw new Error(formatCommandLog(command, result));
+      }
+
+      return result.stdout;
     },
   };
 }
