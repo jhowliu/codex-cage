@@ -1,0 +1,11 @@
+.DS_Store
+node_modules/
+dist/
+coverage/
+issues/
+scripts/
+PRD.md
+recap.md
+.codex-cage.env
+.codex-cage/runs/
+.codex-cage/*.sqlite
