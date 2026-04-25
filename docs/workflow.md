@@ -2,7 +2,7 @@
 
 Codex Cage runs issue-driven Codex work in Docker-owned workspaces. The CLI is built as a set of small orchestration slices: config/init, issue context, repo auth, Docker sandboxing, Compose services, guards, review, publishing, and cleanup.
 
-The `run` command is currently routed in the CLI but not wired into one end-to-end orchestrator yet. The command examples below define the intended interface and are covered by local fake-integration QA so the flow can be validated without real Codex or GitHub calls.
+The `run` command wires those slices into one orchestration loop. It fetches issue context, clones into a Docker volume, runs setup and verification commands, feeds failures back into Codex for bounded retries, runs an independent read-only review, blocks secret-bearing diffs, and publishes a PR only after all gates pass.
 
 ## Install
 
@@ -112,8 +112,6 @@ guards:
 
 ## Running GitHub Issues
 
-Intended command shape:
-
 ```bash
 codex-cage run --issue https://github.com/OWNER/REPO/issues/123
 ```
@@ -123,8 +121,6 @@ GitHub issue URLs infer the target repository. If the current directory has a di
 Successful runs create one branch, one commit, one push, and one ready PR. GitHub issue PR bodies include a closing keyword such as `Closes #123`, so GitHub closes the issue only after PR merge.
 
 ## Running Linear Issues
-
-Intended command shape:
 
 ```bash
 codex-cage run --issue https://linear.app/ORG/issue/ENG-123/title --repo OWNER/REPO
