@@ -7,12 +7,14 @@
     "codex-cage": "./dist/src/cli.js"
   },
   "files": [
-    "dist/src"
+    "dist/src",
+    "docs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
+    "qa": "npm run build && node --test \"dist/test/qa.test.js\"",
     "lint": "npm run typecheck",
     "format": "prettier --check ."
   },
