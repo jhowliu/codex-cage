@@ -82,6 +82,19 @@ Codex Cage prepares disposable Docker resources per run:
 
 The sandbox runs as the non-root `agent` user, clones the target repo into the volume, and does not bind mount the host working tree, Docker socket, SSH config, GitHub CLI config, or host ports.
 
+## Compose Services
+
+Target repos can configure Docker Compose services in `.codex-cage.yml`:
+
+```yaml
+services:
+  compose: docker-compose.yml
+  ready:
+    - pg_isready -h db -U postgres
+```
+
+Codex Cage uses a per-run Compose project name, starts services with `docker compose up -d`, attaches the agent container to the Compose network, runs readiness checks from an ephemeral container on that network, and tears services down with `docker compose down -v`.
+
 ## Development
 
 ```bash
