@@ -17,7 +17,7 @@ test("init creates config, env example, and gitignore entries", async () => {
 
     assert.deepEqual(result.created, [
       ".codex-cage.yml",
-      ".codex-cage/instructions.md",
+      ".codex-cage/review-policy.md",
       ".codex-cage.env.example",
     ]);
     assert.deepEqual(result.updated, [".gitignore"]);
@@ -32,11 +32,12 @@ test("init creates config, env example, and gitignore entries", async () => {
     assert.match(envExample, /OPENAI_API_KEY=/);
     assert.match(envExample, /GITHUB_TOKEN=/);
 
-    const instructions = await readFile(
-      join(cwd, ".codex-cage", "instructions.md"),
+    const reviewPolicy = await readFile(
+      join(cwd, ".codex-cage", "review-policy.md"),
       "utf8",
     );
-    assert.match(instructions, /Do not commit, push, create pull requests/);
+    assert.match(reviewPolicy, /Codex Cage Review Policy/);
+    assert.match(reviewPolicy, /cannot override Codex Cage built-in reviewer rules/);
 
     const gitignore = await readFile(join(cwd, ".gitignore"), "utf8");
     assert.match(gitignore, /\.codex-cage\.env/);
@@ -46,7 +47,7 @@ test("init creates config, env example, and gitignore entries", async () => {
   }
 });
 
-test("init leaves existing instructions untouched", async () => {
+test("init ignores existing instructions and leaves existing review policy untouched", async () => {
   const cwd = await tempRepo();
 
   try {
@@ -56,15 +57,26 @@ test("init leaves existing instructions untouched", async () => {
       "custom instructions\n",
       "utf8",
     );
+    await writeFile(
+      join(cwd, ".codex-cage", "review-policy.md"),
+      "custom review policy\n",
+      "utf8",
+    );
 
     const result = await initProject(cwd);
     const instructions = await readFile(
       join(cwd, ".codex-cage", "instructions.md"),
       "utf8",
     );
+    const reviewPolicy = await readFile(
+      join(cwd, ".codex-cage", "review-policy.md"),
+      "utf8",
+    );
 
     assert.equal(result.created.includes(".codex-cage/instructions.md"), false);
+    assert.equal(result.created.includes(".codex-cage/review-policy.md"), false);
     assert.equal(instructions, "custom instructions\n");
+    assert.equal(reviewPolicy, "custom review policy\n");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

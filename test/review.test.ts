@@ -48,6 +48,8 @@ test("buildReviewPrompt includes read-only instructions and required context", (
     issueContext: "Issue: add review",
     diff: "diff --git a/src/app.ts b/src/app.ts",
     verificationSummary: "npm test passed",
+    reviewPolicyStatus:
+      "Target review policy: present at /workspace/.codex-cage/review-policy.md.",
     resultMetadata: {
       runId: "run-1",
       verify: ["npm test"],
@@ -58,6 +60,7 @@ test("buildReviewPrompt includes read-only instructions and required context", (
   assert.match(prompt, /Do not edit files/);
   assert.match(prompt, /Issue: add review/);
   assert.match(prompt, /npm test passed/);
+  assert.match(prompt, /Target review policy: present/);
   assert.match(prompt, /"runId": "run-1"/);
   assert.match(prompt, /diff --git/);
 });

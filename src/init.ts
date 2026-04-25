@@ -14,7 +14,7 @@ const configPath = ".codex-cage.yml";
 const envExamplePath = ".codex-cage.env.example";
 const gitignorePath = ".gitignore";
 const dockerfilePath = ".codex-cage/Dockerfile";
-const instructionsPath = ".codex-cage/instructions.md";
+const reviewPolicyPath = ".codex-cage/review-policy.md";
 
 const defaultConfig = `# Codex Cage target repo configuration.
 # Replace the verify command before running Codex Cage.
@@ -68,11 +68,22 @@ const dockerfile = `FROM ghcr.io/jhowliu/codex-cage/base:0.1.1
 # Add target-repo system dependencies here.
 `;
 
-const instructions = `# Codex Cage Instructions
+const reviewPolicy = `# Codex Cage Review Policy
 
-- Follow the repository's existing style and tests.
-- Keep changes focused on the issue.
-- Do not commit, push, create pull requests, or write secrets.
+Add project-specific review checks here. These rules are used only during the independent review phase.
+
+This file may add stricter review criteria, but it cannot override Codex Cage built-in reviewer rules or weaken blocking criteria.
+
+## Blocking Checks
+
+- Security-sensitive changes must include tests or a clear validation path.
+- Database migrations must preserve existing data or document why data loss is acceptable.
+- Authentication and authorization changes must cover failure cases.
+- Changes that touch secrets, credentials, tokens, or environment handling must avoid exposing sensitive values to logs, artifacts, or untrusted commands.
+
+## Project-Specific Notes
+
+- Add domain-specific invariants here.
 `;
 
 const gitignoreEntries = [".codex-cage.env", ".codex-cage/runs/", ".codex-cage/*.sqlite"];
@@ -85,7 +96,7 @@ export async function initProject(
   const updated: string[] = [];
   const configFilePath = join(cwd, configPath);
   const dockerfileFilePath = join(cwd, dockerfilePath);
-  const instructionsFilePath = join(cwd, instructionsPath);
+  const reviewPolicyFilePath = join(cwd, reviewPolicyPath);
 
   await assertFileDoesNotExist(cwd, configFilePath);
 
@@ -94,8 +105,8 @@ export async function initProject(
   }
 
   await createFileOnce(cwd, configFilePath, defaultConfig, created);
-  if (!(await fileExists(instructionsFilePath))) {
-    await createFileOnce(cwd, instructionsFilePath, instructions, created);
+  if (!(await fileExists(reviewPolicyFilePath))) {
+    await createFileOnce(cwd, reviewPolicyFilePath, reviewPolicy, created);
   }
   await mergeEnvExample(cwd, join(cwd, envExamplePath), created, updated);
   await appendGitignoreEntries(cwd, join(cwd, gitignorePath), updated);

@@ -60,7 +60,7 @@ codex-cage init
 This creates:
 
 - `.codex-cage.yml`
-- `.codex-cage/instructions.md`
+- `.codex-cage/review-policy.md`
 - `.codex-cage.env.example`
 - `.gitignore` entries for `.codex-cage.env`, run artifacts, and SQLite metadata
 
@@ -74,15 +74,16 @@ codex-cage init --dockerfile
 
 ```yaml
 setup:
-  - npm install
+  - npm ci
+  - cp .codex-cage/test.env .env
 
 verify:
   - npm test
 
 services:
-  compose: docker-compose.yml
+  compose: .codex-cage/docker-compose.yml
   ready:
-    - pg_isready -h db -U postgres
+    - pg_isready -h postgres -U postgres
 
 runtime:
   image: ghcr.io/jhowliu/codex-cage/base:0.1.1
@@ -117,23 +118,57 @@ guards:
 
 `runtime.image` accepts any valid Docker image reference and defaults to the Codex Cage GHCR base image. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image before cloning the target repository. The first version uses `.codex-cage/` as the Docker build context, so target runtime Dockerfiles should keep package-install inputs inside that directory.
 
+## Docker Compose Services
+
+Compose services are started by the host-side Codex Cage orchestrator, not by the implementation agent. Codex Cage runs `docker compose up -d` with a per-run project name, attaches the agent container to the Compose network, runs each `services.ready` command from a short-lived container on that same network, and tears services down with `docker compose down -v`.
+
+This keeps the agent boundary simple:
+
+- Do not mount `/var/run/docker.sock` into the agent container.
+- Do not rely on host ports for agent-to-service traffic.
+- Use Compose service DNS names in target repo env files, such as `postgres`, `redis`, `minio`, or whatever service names the Compose file declares.
+- Keep services private by default; publish host ports only when a target repo explicitly needs them.
+
+Target repos that need an `.env` file for tests should prefer a committed, non-secret fixture copied during `setup`:
+
+```yaml
+setup:
+  - npm ci
+  - cp .codex-cage/test.env .env
+  - npm run migrate --workspace=server
+
+services:
+  compose: .codex-cage/docker-compose.yml
+  ready:
+    - pg_isready -h postgres -U postgres
+```
+
+Example `.codex-cage/test.env`:
+
+```dotenv
+NODE_ENV=test
+DATABASE_URL=postgresql://postgres:postgres@postgres:5432/app_test
+REDIS_URL=redis://redis:6379
+MINIO_ENDPOINT=minio
+```
+
+This is clearer than embedding a long inline script in `.codex-cage.yml`, and it keeps generated `.env` files untracked. Fixture env files must contain only local test credentials; real secrets belong in `.codex-cage.env`.
+
+When a Compose file lives under `.codex-cage/`, Codex Cage still runs Compose with the target repo as the project directory. Relative bind mounts like `./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro` resolve from the repo root during `codex-cage run`. If you run the same Compose file manually, pass `--project-directory <repo-root>` to match Codex Cage's behavior.
+
 ## Prompt Instructions
 
-Codex Cage injects root-level repository instruction files into implementation and review prompts when they exist:
+Codex Cage relies on Codex CLI's native `AGENTS.md` handling for repository implementation guidance. It does not inject the contents of `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, or `CLAUDE.md` into implementation or review prompts.
 
-- `AGENTS.md`
-- `.codex-cage/instructions.md`
-- `.github/copilot-instructions.md`
-- `CLAUDE.md`
-
-Instruction injection is capped at 32 KB total. Missing files are omitted from prompts but recorded in `prompt-context.json`. Codex Cage does not inject README excerpts or raw `.codex-cage.yml` content.
+Independent review has a separate project policy file at `.codex-cage/review-policy.md`. `codex-cage init` creates a starter template. The review policy may add stricter project-specific checks, but it cannot override Codex Cage built-in reviewer rules or weaken blocking criteria. Missing review policy files are allowed.
 
 Each run records prompt context artifacts under `.codex-cage/runs/<run-id>`:
 
 - `prompt-context.json`
-- `instructions.md` when any instructions were included
 - `implementation-prompt-<iteration>.md`
 - `review-prompt-<cycle>.md`
+
+Prompt artifacts include review policy path/status only; they do not include full review policy contents.
 
 ## Running GitHub Issues
 

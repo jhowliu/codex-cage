@@ -33,7 +33,7 @@ codex-cage init
 This creates:
 
 - `.codex-cage.yml`
-- `.codex-cage/instructions.md`
+- `.codex-cage/review-policy.md`
 - `.codex-cage.env.example`
 - `.gitignore` entries for local Codex Cage runtime state
 
@@ -45,7 +45,7 @@ codex-cage init --dockerfile
 
 The generated verify command intentionally fails until replaced with the target repo's real test command.
 
-Codex Cage includes root-level repository instruction files in implementation and review prompts when they exist: `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, and `CLAUDE.md`. The injected instruction text is capped and saved as run artifacts with the rendered prompts.
+Codex Cage relies on Codex CLI's native `AGENTS.md` handling for repository implementation guidance. It does not inject `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, or `CLAUDE.md` contents into prompts. Independent review can use `.codex-cage/review-policy.md` for stricter project-specific checks; prompt artifacts record only whether that policy file is present and where the reviewer can read it.
 
 ## Inspect Local Runs
 
@@ -104,13 +104,25 @@ Runtime images are configured in `.codex-cage.yml`. If `runtime.dockerfile` is s
 Target repos can configure Docker Compose services in `.codex-cage.yml`:
 
 ```yaml
+setup:
+  - npm ci
+  - cp .codex-cage/test.env .env
+  - npm run migrate --workspace=server
+
+verify:
+  - npm run test --workspace=server
+
 services:
-  compose: docker-compose.yml
+  compose: .codex-cage/docker-compose.yml
   ready:
-    - pg_isready -h db -U postgres
+    - pg_isready -h postgres -U postgres
 ```
 
 Codex Cage uses a per-run Compose project name, starts services with `docker compose up -d`, attaches the agent container to the Compose network, runs readiness checks from an ephemeral container on that network, and tears services down with `docker compose down -v`.
+
+Compose is host-orchestrated by Codex Cage. Do not mount `/var/run/docker.sock` into the agent container or expect the agent to run Docker itself. Agent commands should reach dependencies through Compose service DNS names such as `postgres`, `redis`, or `minio`; avoid publishing host ports unless the target repo has a specific reason.
+
+For target repo test environment files, prefer a committed non-secret fixture such as `.codex-cage/test.env` and copy it to `.env` during `setup`. That keeps generated `.env` files local while making test credentials and service hostnames easy to review. Do not commit real secrets in these fixture files.
 
 ## Secret Guards
 
