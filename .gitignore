@@ -9,3 +9,4 @@ recap.md
 .codex-cage.env
 .codex-cage/runs/
 .codex-cage/*.sqlite
+.codex
