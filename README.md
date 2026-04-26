@@ -354,3 +354,7 @@ If the default npm cache has local permission problems, use a temporary cache fo
 npm --cache /tmp/codex-cage-npm-cache exec -- codex-cage --help
 npm --cache /tmp/codex-cage-npm-cache pack --dry-run
 ```
+
+## License
+
+Codex Cage is licensed under the [Apache License 2.0](LICENSE).
