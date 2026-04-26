@@ -11,9 +11,17 @@ import {
 } from "./compose.js";
 import { parseCodexCageConfig, type CodexCageConfig } from "./config.js";
 import {
+  type CommandCredentialIntent,
+  credentialsForCommand,
+  githubTokenFromEnv,
+  issueCredentialEnv,
+  normalizeCredentialEnv,
+} from "./credentials.js";
+import {
   buildRuntimeImage,
   createDockerSandbox,
   dockerRunArgs,
+  type DockerCommandOptions,
   type DockerSandbox,
   type DockerSandboxOptions,
   type RuntimeImageBuildResult,
@@ -105,7 +113,7 @@ export type RunProgressEvent =
     };
 
 export type ShellRunner = {
-  run(command: string): Promise<CommandResult>;
+  run(command: string, options?: DockerCommandOptions): Promise<CommandResult>;
 };
 
 export type RunCodexCageDependencies = {
@@ -268,23 +276,20 @@ export async function runCodexCage(
       }
     }
 
+    const cloneCredentials = runtimeCommandCredentials("clone", context);
     const sandboxOptions: DockerSandboxOptions = {
       runId: context.runId,
       cloneUrl: context.authenticatedRepo.cloneUrl,
       image: context.runtimeImage.image,
-      env: context.secrets,
+      env: cloneCredentials.env ?? {},
     };
-
-    if (context.codexAuthFilePath !== null) {
-      sandboxOptions.codexAuthFilePath = context.codexAuthFilePath;
-    }
 
     if (compose !== null) {
       sandboxOptions.serviceNetworkName = compose.networkName;
     }
 
     sandbox = createSandbox(sandboxOptions);
-    shell = makeShellRunner(sandbox, context.secrets);
+    shell = makeShellRunner(sandbox, {});
     const shellRunner = shell;
 
     await store.updateRunStatus(context.runId, { status: "cloning" });
@@ -297,6 +302,7 @@ export async function runCodexCage(
           context.baseBranch,
         )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
         redactor,
+        runtimeCommandCredentials("clone", context),
       );
       return checkout;
     });
@@ -307,7 +313,14 @@ export async function runCodexCage(
         await runPhase(store, context.runId, "setup", onProgress, async () => {
           const logs: string[] = [];
           for (const command of context.config.setup) {
-            logs.push(await requiredShell(shellRunner, command, redactor));
+            logs.push(
+              await requiredShell(
+                shellRunner,
+                command,
+                redactor,
+                runtimeCommandCredentials("setup", context),
+              ),
+            );
           }
           return logs.join("\n");
         });
@@ -374,17 +387,19 @@ async function prepareRuntimeContext(
   const authenticateRepo =
     dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
   const locateCodexAuthFile = dependencies.findCodexAuthFile ?? findCodexAuthFile;
-  const secrets = normalizeRuntimeEnv(await readEnv(cwd));
+  const secrets = normalizeCredentialEnv(await readEnv(cwd));
   const issueOptions: Parameters<typeof fetchIssueContext>[1] = {
     comments: configResult.config.issue.comments,
   };
+  const issueEnv = issueCredentialEnv(secrets);
+  const githubToken = githubTokenFromEnv(issueEnv);
 
-  if (secrets.GITHUB_TOKEN !== undefined) {
-    issueOptions.githubToken = secrets.GITHUB_TOKEN;
+  if (githubToken !== undefined) {
+    issueOptions.githubToken = githubToken;
   }
 
-  if (secrets.LINEAR_API_KEY !== undefined) {
-    issueOptions.linearApiKey = secrets.LINEAR_API_KEY;
+  if (issueEnv.LINEAR_API_KEY !== undefined) {
+    issueOptions.linearApiKey = issueEnv.LINEAR_API_KEY;
   }
 
   const issue = await fetchContext(options.issueUrl, issueOptions);
@@ -398,7 +413,7 @@ async function prepareRuntimeContext(
   }
 
   const repoResolution = await resolveRepo(repoInput);
-  const authenticatedRepo = authenticateRepo(repoResolution.repo, secrets.GITHUB_TOKEN);
+  const authenticatedRepo = authenticateRepo(repoResolution.repo, githubToken);
   const baseBranch = options.base ?? configResult.config.git.base;
   const model = options.model ?? configResult.config.agent.model;
   const draft = options.draft ?? configResult.config.pr.draft;
@@ -459,21 +474,6 @@ async function readConfig(cwd: string): Promise<{
   }
 }
 
-function normalizeRuntimeEnv(env: Record<string, string>): Record<string, string> {
-  const nonEmptyEnv = Object.fromEntries(
-    Object.entries(env).filter(([, value]) => value.trim() !== ""),
-  );
-
-  if (nonEmptyEnv.GITHUB_TOKEN === undefined || nonEmptyEnv.GH_TOKEN !== undefined) {
-    return nonEmptyEnv;
-  }
-
-  return {
-    ...nonEmptyEnv,
-    GH_TOKEN: nonEmptyEnv.GITHUB_TOKEN,
-  };
-}
-
 async function findCodexAuthFile(): Promise<string | null> {
   const authFilePath = join(homedir(), ".codex", "auth.json");
 
@@ -487,6 +487,16 @@ async function findCodexAuthFile(): Promise<string | null> {
 
     throw error;
   }
+}
+
+function runtimeCommandCredentials(
+  intent: CommandCredentialIntent,
+  context: RuntimeContext,
+): DockerCommandOptions {
+  return credentialsForCommand(intent, {
+    env: context.secrets,
+    codexAuthFilePath: context.codexAuthFilePath,
+  });
 }
 
 async function runImplementationLoop(input: {
@@ -540,6 +550,7 @@ async function runImplementationLoop(input: {
             prompt,
           }),
           input.redactor,
+          runtimeCommandCredentials("implement", input.context),
         );
       },
     );
@@ -552,6 +563,7 @@ async function runImplementationLoop(input: {
       commands: input.context.config.verify,
       redactor: input.redactor,
       onProgress: input.onProgress,
+      commandOptions: runtimeCommandCredentials("verify", input.context),
     });
 
     if (!verification.passed) {
@@ -612,6 +624,7 @@ async function runImplementationLoop(input: {
           `review-prompt-${reviewCycle}.md`,
           input.redactor(reviewPrompt),
         );
+        const reviewCredentials = runtimeCommandCredentials("review", input.context);
         const result = await input.review({
           cwd: input.context.cwd,
           model: input.context.model,
@@ -623,8 +636,8 @@ async function runImplementationLoop(input: {
           reviewPolicyStatus: formatReviewPolicyForPrompt(input.context.promptContext),
           resultMetadata,
           readCurrentDiff: async () => await readCurrentDiff(input.shell),
-          runner: reviewAgentRunner(input.shell),
-          env: input.context.secrets,
+          runner: reviewAgentRunner(input.shell, reviewCredentials),
+          ...(reviewCredentials.env === undefined ? {} : { env: reviewCredentials.env }),
         });
 
         await input.store.addReviewCycle({
@@ -684,8 +697,16 @@ async function runImplementationLoop(input: {
               reviewStatus: "Independent review passed.",
               risks: [],
             },
-            git: shellCommandRunner(input.shell, "git"),
-            gh: shellCommandRunner(input.shell, "gh"),
+            git: shellCommandRunner(
+              input.shell,
+              "git",
+              runtimeCommandCredentials("publish", input.context),
+            ),
+            gh: shellCommandRunner(
+              input.shell,
+              "gh",
+              runtimeCommandCredentials("publish", input.context),
+            ),
           });
         } catch (error) {
           if (error instanceof NoDiffError) {
@@ -737,6 +758,7 @@ async function runVerificationCommands(input: {
   commands: string[];
   redactor: (input: string) => string;
   onProgress: (event: RunProgressEvent) => void;
+  commandOptions?: DockerCommandOptions | undefined;
 }): Promise<
   { passed: true; summary: string; items: string[] } | { passed: false; feedback: string }
 > {
@@ -756,7 +778,7 @@ async function runVerificationCommands(input: {
   const logs: string[] = [];
 
   for (const command of input.commands) {
-    const result = await input.shell.run(command);
+    const result = await input.shell.run(command, input.commandOptions);
     const log = formatCommandLog(command, result);
     logs.push(log);
 
@@ -832,10 +854,14 @@ async function runPhase<TValue = undefined>(
 
 function createDockerShellRunner(
   sandbox: DockerSandbox,
-  env: Record<string, string>,
+  _env: Record<string, string>,
 ): ShellRunner {
   return {
-    async run(command: string): Promise<CommandResult> {
+    async run(
+      command: string,
+      options: DockerCommandOptions = {},
+    ): Promise<CommandResult> {
+      const commandEnv = options.env ?? {};
       const result = await execa(
         "docker",
         dockerRunArgs({
@@ -844,12 +870,12 @@ function createDockerShellRunner(
           volumeName: sandbox.volumeName,
           workspacePath: sandbox.workspacePath,
           labels: { "codex-cage.run_id": sandbox.runId },
-          env,
-          codexAuthFilePath: sandbox.codexAuthFilePath ?? undefined,
+          env: commandEnv,
+          codexAuthFilePath: options.codexAuthFilePath,
           command,
         }),
         {
-          env,
+          env: commandEnv,
           reject: false,
         },
       );
@@ -863,15 +889,22 @@ function createDockerShellRunner(
   };
 }
 
-function shellCommandRunner(shell: ShellRunner, executable: string): CommandRunner {
+function shellCommandRunner(
+  shell: ShellRunner,
+  executable: string,
+  options?: DockerCommandOptions,
+): CommandRunner {
   return {
     async run(args: string[]): Promise<CommandResult> {
-      return await shell.run([executable, ...args].map(shellQuote).join(" "));
+      return await shell.run([executable, ...args].map(shellQuote).join(" "), options);
     },
   };
 }
 
-function reviewAgentRunner(shell: ShellRunner): ReviewAgentRunner {
+function reviewAgentRunner(
+  shell: ShellRunner,
+  options?: DockerCommandOptions,
+): ReviewAgentRunner {
   return {
     async run(input): Promise<string> {
       const outputSchemaPath = "/tmp/codex-cage-review-output-schema.json";
@@ -885,7 +918,7 @@ function reviewAgentRunner(shell: ShellRunner): ReviewAgentRunner {
         outputSchemaPath,
         prompt: input.prompt,
       })}`;
-      const result = await shell.run(command);
+      const result = await shell.run(command, options);
 
       if (result.exitCode !== 0) {
         throw new Error(formatCommandLog(command, result));
@@ -900,8 +933,9 @@ async function requiredShell(
   shell: ShellRunner,
   command: string,
   redactor: (input: string) => string = (input) => input,
+  options?: DockerCommandOptions,
 ): Promise<string> {
-  const result = await shell.run(command);
+  const result = await shell.run(command, options);
   const log = redactor(formatCommandLog(command, result));
 
   if (result.exitCode !== 0) {

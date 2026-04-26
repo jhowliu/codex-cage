@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  type DockerCommandOptions,
   defaultSandboxImage,
   type DockerSandbox,
   type DockerSandboxOptions,
@@ -54,7 +55,6 @@ function fakeSandbox(events: string[]): DockerSandbox {
     networkName: "fake-network",
     ownedNetworkName: "fake-network",
     workspacePath: "/workspace",
-    codexAuthFilePath: null,
     async create(): Promise<void> {
       events.push("sandbox:create");
     },
@@ -72,13 +72,17 @@ function fakeSandbox(events: string[]): DockerSandbox {
 
 function shellRunner(results: Map<string, CommandResult>): ShellRunner & {
   commands: string[];
+  commandOptions: DockerCommandOptions[];
 } {
   const commands: string[] = [];
+  const commandOptions: DockerCommandOptions[] = [];
 
   return {
     commands,
-    async run(command): Promise<CommandResult> {
+    commandOptions,
+    async run(command, options = {}): Promise<CommandResult> {
       commands.push(command);
+      commandOptions.push(options);
 
       for (const [pattern, result] of results) {
         if (command.includes(pattern)) {
@@ -188,6 +192,8 @@ verify:
 
 test("runCodexCage executes the happy path and records a successful run", async () => {
   const cwd = await createProject(`
+setup:
+  - npm install
 verify:
   - npm test
 `);
@@ -215,8 +221,12 @@ verify:
   const shell = shellRunner(
     new Map([
       ["git fetch origin", commandResult()],
+      ["npm install", commandResult("setup passed")],
+      ["--sandbox 'read-only'", commandResult("review passed")],
       ["codex exec", commandResult("implemented")],
       ["npm test", commandResult("tests passed")],
+      ["'git' 'status'", commandResult("clean")],
+      ["'gh' 'pr' 'view'", commandResult("pr")],
       [
         "git add --intent-to-add",
         commandResult(`diff --git a/src/app.ts b/src/app.ts
@@ -230,6 +240,7 @@ verify:
   const published: PublishSuccessfulRunInput[] = [];
   let reviewIssueContext = "";
   let reviewPolicyStatus = "";
+  let reviewEnv: Record<string, string> | undefined;
 
   try {
     const result = await runCodexCage(
@@ -239,7 +250,12 @@ verify:
       },
       {
         generateRunId: () => "run-test-123",
-        readEnv: async () => ({ GITHUB_TOKEN: "token-value", OPENAI_API_KEY: "" }),
+        readEnv: async () => ({
+          GITHUB_TOKEN: "token-value",
+          OPENAI_API_KEY: "",
+          LINEAR_API_KEY: "linear-value",
+          APP_ENV: "test",
+        }),
         findCodexAuthFile: async () => "/host/.codex/auth.json",
         fetchIssueContext: async () => issue,
         resolveTargetRepo: async () => repoResolution,
@@ -258,10 +274,19 @@ verify:
         runIndependentReview: async (input) => {
           reviewIssueContext = input.issueContext;
           reviewPolicyStatus = input.reviewPolicyStatus ?? "";
+          reviewEnv = input.env;
+          await input.runner?.run({
+            cwd: input.cwd,
+            model: input.model,
+            prompt: "review",
+            outputSchema: { type: "object" },
+          });
           return passingReview();
         },
         publishSuccessfulRun: async (input) => {
           published.push(input);
+          await input.git?.run(["status"]);
+          await input.gh?.run(["pr", "view"]);
           return {
             branchName: input.branchName ?? "codex-cage/gh-26-run-test",
             commitMessage: "#26 Wire run command",
@@ -285,9 +310,56 @@ verify:
       GH_TOKEN: "token-value",
       GITHUB_TOKEN: "token-value",
     });
-    assert.equal(sandboxOptions[0]?.codexAuthFilePath, "/host/.codex/auth.json");
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
+    assert.deepEqual(reviewEnv, {});
+
+    const setupIndex = shell.commands.findIndex((command) => command === "npm install");
+    const checkoutIndex = shell.commands.findIndex((command) =>
+      command.includes("git fetch origin"),
+    );
+    const verifyIndex = shell.commands.findIndex((command) => command === "npm test");
+    const implementIndex = shell.commands.findIndex(
+      (command) =>
+        command.includes("codex exec") && command.includes("--sandbox 'workspace-write'"),
+    );
+    const reviewIndex = shell.commands.findIndex(
+      (command) =>
+        command.includes("codex exec") && command.includes("--sandbox 'read-only'"),
+    );
+    const publishGitIndex = shell.commands.findIndex(
+      (command) => command === "'git' 'status'",
+    );
+    const publishGhIndex = shell.commands.findIndex(
+      (command) => command === "'gh' 'pr' 'view'",
+    );
+
+    assert.deepEqual(shell.commandOptions[checkoutIndex]?.env, {
+      GH_TOKEN: "token-value",
+      GITHUB_TOKEN: "token-value",
+    });
+    assert.deepEqual(shell.commandOptions[setupIndex]?.env, { APP_ENV: "test" });
+    assert.equal(shell.commandOptions[setupIndex]?.codexAuthFilePath, undefined);
+    assert.deepEqual(shell.commandOptions[verifyIndex]?.env, { APP_ENV: "test" });
+    assert.equal(shell.commandOptions[verifyIndex]?.codexAuthFilePath, undefined);
+    assert.deepEqual(shell.commandOptions[implementIndex]?.env, {});
+    assert.equal(
+      shell.commandOptions[implementIndex]?.codexAuthFilePath,
+      "/host/.codex/auth.json",
+    );
+    assert.deepEqual(shell.commandOptions[reviewIndex]?.env, {});
+    assert.equal(
+      shell.commandOptions[reviewIndex]?.codexAuthFilePath,
+      "/host/.codex/auth.json",
+    );
+    assert.deepEqual(shell.commandOptions[publishGitIndex]?.env, {
+      GH_TOKEN: "token-value",
+      GITHUB_TOKEN: "token-value",
+    });
+    assert.deepEqual(shell.commandOptions[publishGhIndex]?.env, {
+      GH_TOKEN: "token-value",
+      GITHUB_TOKEN: "token-value",
+    });
 
     const store = await openRunStore(cwd);
     const details = store.getRunDetails("run-test-123");
@@ -326,7 +398,7 @@ verify:
     });
     assert.deepEqual(
       details.phases.map((phase) => phase.name),
-      ["preflight", "cloning", "implement", "verify", "review", "pr"],
+      ["preflight", "cloning", "setup", "implement", "verify", "review", "pr"],
     );
   } finally {
     await rm(cwd, { recursive: true, force: true });

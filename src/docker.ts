@@ -26,6 +26,10 @@ export type DockerSandboxOptions = {
   serviceNetworkName?: string;
   labels?: Record<string, string>;
   env?: Record<string, string>;
+};
+
+export type DockerCommandOptions = {
+  env?: Record<string, string>;
   codexAuthFilePath?: string | undefined;
 };
 
@@ -36,10 +40,9 @@ export type DockerSandbox = {
   networkName: string;
   ownedNetworkName: string | null;
   workspacePath: string;
-  codexAuthFilePath: string | null;
   create(): Promise<void>;
   cloneRepository(): Promise<void>;
-  runCommand(command: string): Promise<void>;
+  runCommand(command: string, options?: DockerCommandOptions): Promise<void>;
   cleanup(): Promise<void>;
 };
 
@@ -127,7 +130,6 @@ export function createDockerSandbox(
     networkName: agentNetworkName,
     ownedNetworkName,
     workspacePath,
-    codexAuthFilePath: options.codexAuthFilePath ?? null,
     async create(): Promise<void> {
       await runner.run(volumeCreateArgs(volumeName, labels));
       if (ownedNetworkName !== null) {
@@ -135,6 +137,8 @@ export function createDockerSandbox(
       }
     },
     async cloneRepository(): Promise<void> {
+      const env = options.env ?? {};
+      const remoteUrl = unauthenticatedRemoteUrl(options.cloneUrl);
       await runner.run(
         dockerRunArgs({
           image,
@@ -142,14 +146,20 @@ export function createDockerSandbox(
           volumeName,
           workspacePath,
           labels,
-          env: options.env ?? {},
-          codexAuthFilePath: options.codexAuthFilePath,
-          command: `git clone ${shellQuote(options.cloneUrl)} .`,
+          env,
+          command: [
+            `git clone ${shellQuote(remoteUrl)} .`,
+            `git remote set-url origin ${shellQuote(remoteUrl)}`,
+          ].join(" && "),
         }),
-        { env: options.env ?? {} },
+        { env },
       );
     },
-    async runCommand(command: string): Promise<void> {
+    async runCommand(
+      command: string,
+      commandOptions: DockerCommandOptions = {},
+    ): Promise<void> {
+      const env = commandOptions.env ?? {};
       await runner.run(
         dockerRunArgs({
           image,
@@ -157,11 +167,11 @@ export function createDockerSandbox(
           volumeName,
           workspacePath,
           labels,
-          env: options.env ?? {},
-          codexAuthFilePath: options.codexAuthFilePath,
+          env,
+          codexAuthFilePath: commandOptions.codexAuthFilePath,
           command,
         }),
-        { env: options.env ?? {} },
+        { env },
       );
     },
     async cleanup(): Promise<void> {
@@ -285,6 +295,24 @@ export function runtimeImageName(runId: string): string {
   return `codex-cage/runtime-${safeDockerNameSegment(runId)}:latest`;
 }
 
+export function unauthenticatedRemoteUrl(cloneUrl: string): string {
+  let url: URL;
+
+  try {
+    url = new URL(cloneUrl);
+  } catch {
+    return cloneUrl;
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return cloneUrl;
+  }
+
+  url.username = "";
+  url.password = "";
+  return url.toString();
+}
+
 export function volumeCreateArgs(
   volumeName: string,
   labels: Record<string, string>,
@@ -345,8 +373,15 @@ export function dockerRunArgs(input: DockerRunArgsInput): string[] {
     input.image,
     "sh",
     "-lc",
-    commandWithCodexAuth(input.command, input.codexAuthFilePath),
+    commandWithAuth(input.command, input),
   ];
+}
+
+function commandWithAuth(command: string, input: DockerRunArgsInput): string {
+  return commandWithGitHubAuth(
+    commandWithCodexAuth(command, input.codexAuthFilePath),
+    input.env,
+  );
 }
 
 function codexAuthMountArgs(codexAuthFilePath: string | undefined): string[] {
@@ -375,6 +410,31 @@ function commandWithCodexAuth(
     "fi",
     command,
   ].join("; ");
+}
+
+function commandWithGitHubAuth(
+  command: string,
+  env: Record<string, string>,
+): string {
+  if (env.GITHUB_TOKEN === undefined && env.GH_TOKEN === undefined) {
+    return command;
+  }
+
+  return [
+    "tmp_git_askpass=$(mktemp)",
+    "cat > \"$tmp_git_askpass\" <<'EOF'",
+    "#!/bin/sh",
+    'case "$1" in',
+    '*Username*) printf "%s\\n" "x-access-token" ;;',
+    '*Password*) printf "%s\\n" "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ;;',
+    '*) printf "%s\\n" ;;',
+    "esac",
+    "EOF",
+    'chmod 700 "$tmp_git_askpass"',
+    'export GIT_ASKPASS="$tmp_git_askpass" GIT_TERMINAL_PROMPT=0',
+    'trap \'rm -f "$tmp_git_askpass"\' EXIT',
+    command,
+  ].join("\n");
 }
 
 function labelArgs(labels: Record<string, string>): string[] {
