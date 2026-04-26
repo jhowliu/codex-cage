@@ -4,27 +4,94 @@ Codex Cage is a lightweight CLI for running Codex against issue-driven work in a
 
 Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
 
-## Current Commands
+## Install
+
+Requirements:
+
+- Node.js `>=22`
+- Docker
+- Git
+- A Codex auth method, either `OPENAI_API_KEY` or host Codex OAuth
+- `GITHUB_TOKEN` for GitHub issue lookup, clone, push, and PR creation
+
+From this repository:
 
 ```bash
+npm install
+npm run build
+npm install -g .
 codex-cage --help
-codex-cage init
-codex-cage init --dockerfile
-codex-cage run --issue <url>
-codex-cage runs list
-codex-cage runs show <run-id>
-codex-cage cleanup
 ```
 
-Implemented commands:
+For a one-off local invocation without global install:
 
-- `init`
-- `run`
-- `runs list`
-- `runs show`
-- `cleanup`
+```bash
+npm install
+npm run build
+npm exec -- codex-cage --help
+```
 
-## Initialize a Target Repo
+## Run Codex Cage
+
+Run initialization inside the target repository:
+
+```bash
+codex-cage init
+```
+
+Then edit `.codex-cage.yml` so `setup` installs the target repo dependencies and `verify` runs the real validation command:
+
+```yaml
+setup:
+  - npm ci
+
+verify:
+  - npm test
+```
+
+Create `.codex-cage.env` in the target repository with local secrets that must not be committed:
+
+```dotenv
+OPENAI_API_KEY=...
+GITHUB_TOKEN=...
+LINEAR_API_KEY=...
+```
+
+Run a GitHub issue:
+
+```bash
+codex-cage run https://github.com/OWNER/REPO/issues/123
+```
+
+Run a Linear issue by passing the target GitHub repo:
+
+```bash
+codex-cage run https://linear.app/ORG/issue/ENG-123/title --repo OWNER/REPO
+```
+
+Inspect local run state:
+
+```bash
+codex-cage runs list
+codex-cage runs show <run-id>
+```
+
+## Command Reference
+
+Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI help.
+
+| Command                              | Purpose                                                                                 |
+| ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `codex-cage init`                    | Create Codex Cage config files in the current repository.                               |
+| `codex-cage init --dockerfile`       | Also create `.codex-cage/Dockerfile` for target repos that need custom system packages. |
+| `codex-cage run <issue-url>`         | Run the full issue-to-PR workflow for a GitHub or Linear issue.                         |
+| `codex-cage run --issue <issue-url>` | Alternate issue URL form kept for compatibility.                                        |
+| `codex-cage runs list`               | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.                        |
+| `codex-cage runs show <run-id>`      | Show run metadata, phase status, and artifact paths.                                    |
+| `codex-cage cleanup`                 | Remove stale stopped Docker resources managed by Codex Cage.                            |
+| `codex-cage cleanup --all`           | Remove all managed Docker resources, including active ones.                             |
+
+### Initialize a Target Repo
 
 ```bash
 codex-cage init
@@ -43,26 +110,142 @@ Use `--dockerfile` when the target repo needs custom system packages:
 codex-cage init --dockerfile
 ```
 
-The generated verify command intentionally fails until replaced with the target repo's real test command.
+The generated verify command intentionally fails until replaced with the target repo's real test command. Re-running `init` leaves existing config files in place and creates only missing managed files.
 
 Codex Cage relies on Codex CLI's native `AGENTS.md` handling for repository implementation guidance. It does not inject `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, or `CLAUDE.md` contents into prompts. Independent review can use `.codex-cage/review-policy.md` for stricter project-specific checks; prompt artifacts record only whether that policy file is present and where the reviewer can read it.
 
-## Inspect Local Runs
+### Run an Issue
+
+```bash
+codex-cage run https://github.com/OWNER/REPO/issues/123
+```
+
+Common options:
+
+- `--repo OWNER/REPO`: override target repo resolution, commonly needed for Linear issues.
+- `--base <branch>`: override the base branch from config.
+- `--model <model>`: override the Codex model for this run.
+- `--draft`: create a draft GitHub PR.
+
+The `run` command reads `.codex-cage.yml` and `.codex-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
+
+### Inspect Local Runs
 
 ```bash
 codex-cage runs list
 codex-cage runs show <run-id>
 ```
 
-Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such as logs, patches, issue payloads, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
+Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such as logs, patches, issue payloads, prompt context, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
 
-## Run an Issue
+## Design Architecture
 
-```bash
-codex-cage run --issue https://github.com/OWNER/REPO/issues/123
+Codex Cage is organized as a host-side orchestrator around disposable Docker workspaces. The host CLI owns configuration, issue lookup, repository resolution, Docker resource lifecycle, credential scoping, run state, verification, review, and publishing. Implementation and review agents run inside the sandbox with only the credentials and filesystem access required for their phase.
+
+Host preparation:
+
+```mermaid
+sequenceDiagram
+  actor User
+  participant CLI
+  participant Run as Orchestrator
+  participant Issue as Issue provider
+  participant Repo as Target repo
+  participant State as State/artifacts
+
+  User->>CLI: codex-cage run <issue-url>
+  CLI->>Run: Load config and local env
+  Run->>Issue: Fetch issue context
+  Issue-->>Run: Normalized issue payload
+  Run->>Repo: Resolve repo and base branch
+  Repo-->>Run: Clone URL and base ref
+  Run->>State: Create run record and artifact directory
 ```
 
-The `run` command reads `.codex-cage.yml` and `.codex-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
+Sandbox execution:
+
+```mermaid
+sequenceDiagram
+  participant Run as Orchestrator
+  participant Docker as Docker sandbox
+  participant Agent as Implementation agent
+
+  Run->>Docker: Build/select runtime image
+  Run->>Docker: Create volume, network, and container
+  Docker-->>Run: Workspace ready
+  opt Compose services configured
+    Run->>Docker: Start services and readiness checks
+  end
+  Run->>Docker: Run setup commands
+  loop Implementation iterations
+    Run->>Agent: Execute implementation prompt
+    Agent->>Docker: Edit /workspace
+    Run->>Docker: Run verification commands
+    Docker-->>Run: Verification result
+  end
+```
+
+Gates and publish:
+
+```mermaid
+sequenceDiagram
+  participant Run as Orchestrator
+  participant Guard as Secret guards
+  participant Review as Review agent
+  participant GitHub
+  participant State as State/artifacts
+
+  Run->>Guard: Scan diff
+  alt Guard fails
+    Run->>State: Record guard_failed or retry implementation
+  else Guard passes
+    Run->>Review: Run read-only structured review
+    alt Review blocks
+      Run->>State: Record review_failed or retry implementation
+    else Review passes
+      Run->>GitHub: Commit, push, and create PR
+      GitHub-->>Run: PR URL
+      Run->>State: Record success metadata
+    end
+  end
+```
+
+The main runtime flow is:
+
+1. Load `.codex-cage.yml` and `.codex-cage.env`.
+2. Fetch issue context from GitHub or Linear.
+3. Resolve the target repository and base branch.
+4. Create a run record, artifact directory, Docker volume, and Docker network.
+5. Build or select the runtime image.
+6. Clone the target repo into the Docker workspace.
+7. Start configured Compose services and run setup commands.
+8. Run Codex implementation iterations.
+9. Run configured verification commands.
+10. Scan the diff for secret leaks and protected files.
+11. Run independent read-only Codex review.
+12. Commit, push, and create a GitHub PR only after all gates pass.
+
+Module responsibilities:
+
+- `src/cli.ts` and `src/commands.ts`: command-line parsing, user-facing output, and command dispatch.
+- `src/config.ts`: `.codex-cage.yml` schema, defaults, validation, and warnings.
+- `src/issue.ts` and `src/repo.ts`: issue-provider normalization and repository resolution.
+- `src/run.ts`: top-level orchestration loop and phase transitions.
+- `src/docker.ts` and `src/compose.ts`: Docker sandbox, runtime image, command execution, and Compose lifecycle.
+- `src/credentials.ts`: credential classification and phase-scoped command options.
+- `src/state.ts`: SQLite run metadata plus filesystem artifact paths.
+- `src/prompt-context.ts` and `src/review.ts`: prompt artifacts, review policy discovery, structured review execution, and review parsing.
+- `src/guards.ts`: diff and secret guard checks before publish.
+- `src/publish.ts`: branch, commit, push, and pull request creation.
+- `src/init.ts`: target-repo bootstrap files.
+
+Architectural boundaries:
+
+- Keep host orchestration separate from sandbox execution. The target repo is cloned into a Docker volume; the host working tree is not bind-mounted into the agent container.
+- Keep credentials phase-scoped. Setup and verify should not receive Codex, OpenAI, or GitHub credentials by default; implementation and review receive only Codex auth; publish receives only GitHub auth.
+- Treat issue bodies, comments, target repo files, and command output as untrusted input. Validate structured data at boundaries and redact known secret values before writing logs.
+- Keep publishing host-owned. Implementation and review agents must not commit, push, or create PRs.
+- Store small run metadata in SQLite and large artifacts as files under `.codex-cage/runs/<run-id>`.
 
 ## Issue Context
 
@@ -144,23 +327,26 @@ PR bodies include the summary, verification, review status, risks, run id, and i
 
 ## Cleanup
 
+Use cleanup to remove Docker resources with Codex Cage labels. It never deletes local run artifacts or the SQLite database.
+
 ```bash
 codex-cage cleanup
 codex-cage cleanup --all
 ```
 
-Cleanup removes Docker resources labeled as managed by Codex Cage. By default it removes stopped containers plus networks and volumes for runs without active managed containers. `--all` also removes active managed containers and their networks and volumes. Cleanup never deletes `.codex-cage/runs` artifacts or the SQLite database.
+- `codex-cage cleanup` removes stopped containers plus networks and volumes for runs without active managed containers.
+- `codex-cage cleanup --all` also removes active managed containers and their networks and volumes.
 
 ## Development
 
-```bash
-npm install
-npm run typecheck
-npm test
-npm run qa
-npm run qa:image
-npm run format
-```
+| Command             | Purpose                                     |
+| ------------------- | ------------------------------------------- |
+| `npm install`       | Install project dependencies.               |
+| `npm run typecheck` | Run TypeScript without emitting files.      |
+| `npm test`          | Build and run the Node test suite.          |
+| `npm run qa`        | Run the focused QA harness.                 |
+| `npm run qa:image`  | Build and smoke-test the base Docker image. |
+| `npm run format`    | Check repository formatting with Prettier.  |
 
 If the default npm cache has local permission problems, use a temporary cache for package smoke checks:
 
