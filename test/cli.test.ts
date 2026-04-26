@@ -130,6 +130,42 @@ test("run keeps the --issue option for compatibility", async () => {
   ]);
 });
 
+test("run accepts --no-publish", async () => {
+  const calls: RunCommandOptions[] = [];
+  const originalConsoleLog = console.log;
+  const program = createCli({
+    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+      calls.push(input);
+      return {
+        runId: "run-cli-test",
+        status: "succeeded",
+        failureCode: null,
+        prUrl: null,
+      };
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = () => undefined;
+
+  try {
+    await program.parseAsync(
+      ["run", "--no-publish", "https://github.com/jhowliu/codex-cage/issues/35"],
+      { from: "user" },
+    );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
+      publish: false,
+    },
+  ]);
+});
+
 test("runs list and show read local run metadata", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-runs-"));
 

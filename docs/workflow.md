@@ -100,6 +100,7 @@ timeouts:
   idle_minutes: 10
 
 pr:
+  publish: true
   draft: false
 
 git:
@@ -115,6 +116,8 @@ guards:
 ```
 
 `verify` must contain at least one command. The generated default intentionally fails until replaced with the target repo's real validation command.
+
+Set `pr.publish: false` or run `codex-cage run --no-publish ...` to stop after verification, guard scanning, independent review, and final artifact generation. Successful no-publish runs do not push a branch or create a PR; inspect `.codex-cage/runs/<run-id>/final.patch` and `summary.md` for the resulting patch and artifact locations.
 
 `runtime.image` accepts any valid Docker image reference and defaults to the Codex Cage GHCR base image. If `runtime.dockerfile` is set, Codex Cage builds a labeled per-run image before cloning the target repository. The first version uses `.codex-cage/` as the Docker build context, so target runtime Dockerfiles should keep package-install inputs inside that directory.
 

@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { join } from "node:path";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { initProject } from "./init.js";
 import { runCodexCage, type RunProgressEvent } from "./run.js";
@@ -46,6 +47,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
+    .option("--no-publish", "stop after successful artifacts without creating a PR")
     .action(
       async (
         issueArgument: string | undefined,
@@ -55,6 +57,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           base?: string;
           model?: string;
           draft?: boolean;
+          publish?: boolean;
         },
         command: Command,
       ) => {
@@ -73,6 +76,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
             base: options.base,
             model: options.model,
             draft: options.draft,
+            publish: options.publish === false ? false : undefined,
           }),
           {
             onProgress: (event) => {
@@ -94,6 +98,13 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
         if (result.prUrl !== null) {
           console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
+        } else if (result.status === "succeeded") {
+          const artifactDir = join(process.cwd(), ".codex-cage", "runs", result.runId);
+          console.log(`${stdoutColor.label("PR")}: not created`);
+          console.log(`${stdoutColor.label("Artifacts")}: ${artifactDir}`);
+          console.log(
+            `${stdoutColor.label("Final patch")}: ${join(artifactDir, "final.patch")}`,
+          );
         }
       },
     );

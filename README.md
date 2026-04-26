@@ -11,6 +11,7 @@ codex-cage --help
 codex-cage init
 codex-cage init --dockerfile
 codex-cage run --issue <url>
+codex-cage run --no-publish --issue <url>
 codex-cage runs list
 codex-cage runs show <run-id>
 codex-cage cleanup
@@ -63,6 +64,8 @@ codex-cage run --issue https://github.com/OWNER/REPO/issues/123
 ```
 
 The `run` command reads `.codex-cage.yml` and `.codex-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
+
+Use `--no-publish` or set `pr.publish: false` to stop after successful final patch and summary artifact generation without pushing a branch or creating a PR. The command reports that no PR was created and points to `.codex-cage/runs/<run-id>/final.patch`.
 
 ## Issue Context
 
@@ -139,6 +142,8 @@ Review is read-only. If the diff changes during review, the run fails instead of
 ## Publishing
 
 Successful runs are published by the orchestrator, not by the implementation or review agents. Codex Cage rejects empty diffs, creates a run-specific branch, configures the Codex Cage git author, commits once, pushes without force, and creates a ready GitHub PR by default.
+
+Publishing remains enabled by default. In no-publish mode, the run still rejects empty diffs and records `summary.md`, `final.patch`, and `pr.json` under the run artifact directory, but it does not perform remote writes.
 
 PR bodies include the summary, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
 

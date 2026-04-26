@@ -73,6 +73,7 @@ export type RunCommandOptions = {
   base?: string | undefined;
   model?: string | undefined;
   draft?: boolean | undefined;
+  publish?: boolean | undefined;
 };
 
 export type RunCodexCageResult = {
@@ -147,6 +148,7 @@ type RuntimeContext = {
   baseBranch: string;
   model: string;
   draft: boolean;
+  publish: boolean;
   runId: string;
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
@@ -417,6 +419,7 @@ async function prepareRuntimeContext(
   const baseBranch = options.base ?? configResult.config.git.base;
   const model = options.model ?? configResult.config.agent.model;
   const draft = options.draft ?? configResult.config.pr.draft;
+  const publish = options.publish ?? configResult.config.pr.publish;
   const runId = dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
   const runtimeImage = {
@@ -440,6 +443,7 @@ async function prepareRuntimeContext(
     baseBranch,
     model,
     draft,
+    publish,
     runId,
     branchName,
     runtimeImage,
@@ -671,6 +675,45 @@ async function runImplementationLoop(input: {
       throw new RunFailureError("review_blocking", reviewResult.nextAction.feedback);
     }
 
+    const finalPatch = await readCurrentDiff(input.shell);
+
+    if (finalPatch.trim() === "") {
+      throw new NoDiffError();
+    }
+
+    await input.store.writeArtifact(input.context.runId, "final.patch", finalPatch);
+
+    if (!input.context.publish) {
+      await writeJsonArtifact(input.store, input.context.runId, "pr.json", {
+        created: false,
+        reason: "publish disabled",
+      });
+      await input.store.writeArtifact(
+        input.context.runId,
+        "summary.md",
+        [
+          `# ${input.context.runId}`,
+          "",
+          "PR: not created (publish disabled)",
+          `Final patch: ${input.store.artifactPath(input.context.runId, "final.patch")}`,
+          `Artifacts: ${input.store.runDirectory(input.context.runId)}`,
+          "",
+        ].join("\n"),
+      );
+      await input.store.updateRunStatus(input.context.runId, {
+        status: "succeeded",
+        prUrl: null,
+        finishedAt: new Date(),
+      });
+
+      return {
+        runId: input.context.runId,
+        status: "succeeded",
+        failureCode: null,
+        prUrl: null,
+      };
+    }
+
     await input.store.updateRunStatus(input.context.runId, { status: "creating_pr" });
     const publishResult = await runPhase(
       input.store,
@@ -724,11 +767,6 @@ async function runImplementationLoop(input: {
     );
 
     await writeJsonArtifact(input.store, input.context.runId, "pr.json", publishResult);
-    await input.store.writeArtifact(
-      input.context.runId,
-      "final.patch",
-      await readCurrentDiff(input.shell),
-    );
     await input.store.writeArtifact(
       input.context.runId,
       "summary.md",

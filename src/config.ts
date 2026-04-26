@@ -33,9 +33,10 @@ export const codexCageConfigSchema = z
       .default(() => ({ total_minutes: 90, command_minutes: 20, idle_minutes: 10 })),
     pr: z
       .object({
+        publish: z.boolean().default(true),
         draft: z.boolean().default(false),
       })
-      .default(() => ({ draft: false })),
+      .default(() => ({ publish: true, draft: false })),
     git: z
       .object({
         base: z.string().default("main"),

@@ -11,12 +11,25 @@ test("config schema accepts a minimal valid config", () => {
   assert.deepEqual(config.setup, []);
   assert.deepEqual(config.verify, ["npm test"]);
   assert.equal(config.git.base, "main");
+  assert.equal(config.pr.publish, true);
   assert.equal(config.pr.draft, false);
   assert.equal(config.issue.comments, 10);
   assert.deepEqual(config.runtime, {
     image: defaultSandboxImage,
     dockerfile: null,
   });
+});
+
+test("config schema supports disabling publish", () => {
+  const config = codexCageConfigSchema.parse({
+    verify: ["npm test"],
+    pr: {
+      publish: false,
+    },
+  });
+
+  assert.equal(config.pr.publish, false);
+  assert.equal(config.pr.draft, false);
 });
 
 test("config schema rejects empty verify commands", () => {

@@ -42,6 +42,7 @@ timeouts:
   idle_minutes: 10
 
 pr:
+  publish: true
   draft: false
 
 git:
