@@ -40,6 +40,7 @@ export type BuildReviewPromptInput = {
   issueContext: string;
   diff: string;
   verificationSummary: string;
+  reviewPolicyStatus?: string | undefined;
   resultMetadata: Record<string, unknown>;
 };
 
@@ -248,6 +249,9 @@ ${input.issueContext}
 
 Verification summary:
 ${input.verificationSummary}
+
+Review policy:
+${input.reviewPolicyStatus ?? "Target review policy: missing. Proceed with built-in review rules."}
 
 Result metadata:
 ${JSON.stringify(input.resultMetadata, null, 2)}

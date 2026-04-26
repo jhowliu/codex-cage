@@ -35,7 +35,7 @@ import {
 } from "./publish.js";
 import {
   buildPromptContext,
-  formatInstructionsForPrompt,
+  formatReviewPolicyForPrompt,
   type PromptContext,
 } from "./prompt-context.js";
 import {
@@ -603,6 +603,7 @@ async function runImplementationLoop(input: {
         const reviewPrompt = buildReviewPrompt({
           issueContext: reviewIssueContext,
           verificationSummary: verification.summary,
+          reviewPolicyStatus: formatReviewPolicyForPrompt(input.context.promptContext),
           resultMetadata,
           diff,
         });
@@ -619,6 +620,7 @@ async function runImplementationLoop(input: {
           issueContext: reviewIssueContext,
           diff,
           verificationSummary: verification.summary,
+          reviewPolicyStatus: formatReviewPolicyForPrompt(input.context.promptContext),
           resultMetadata,
           readCurrentDiff: async () => await readCurrentDiff(input.shell),
           runner: reviewAgentRunner(input.shell),
@@ -937,13 +939,12 @@ Rules:
 - Work only in this repository.
 - Do not commit, push, create pull requests, or write secrets.
 - Run only commands needed to implement the issue; Codex Cage will run verification separately.
+- Follow applicable native Codex AGENTS.md files discovered in this repository.
 - If the issue lacks enough detail to implement safely, stop and explain the blocker.
 
 Iteration: ${input.iteration}
 Repository: ${input.context.repoResolution.repo.fullName}
 Base branch: ${input.context.baseBranch}
-
-${formatInstructionsForPrompt(input.context.promptContext)}
 
 Issue:
 ${formatIssueContext(input.context.issue)}
@@ -954,9 +955,7 @@ ${feedback}
 }
 
 function formatReviewIssueContext(context: RuntimeContext): string {
-  return `${formatInstructionsForPrompt(context.promptContext)}
-
-Issue:
+  return `Issue:
 ${formatIssueContext(context.issue)}`;
 }
 
@@ -1084,18 +1083,8 @@ async function writePromptContextArtifacts(
   context: RuntimeContext,
 ): Promise<void> {
   await writeJsonArtifact(store, context.runId, "prompt-context.json", {
-    instructionFiles: context.promptContext.instructionFiles,
-    limitBytes: context.promptContext.limitBytes,
-    truncated: context.promptContext.truncated,
+    reviewPolicy: context.promptContext.reviewPolicy,
   });
-
-  if (context.promptContext.instructions !== "") {
-    await store.writeArtifact(
-      context.runId,
-      "instructions.md",
-      context.promptContext.instructions,
-    );
-  }
 }
 
 async function writeFailureSummary(

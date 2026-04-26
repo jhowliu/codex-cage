@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -165,9 +165,17 @@ verify:
       join(cwd, ".codex-cage", "runs", "run-review-stdout", "review.log"),
       "utf8",
     );
+    const reviewPrompt = await readFile(
+      join(cwd, ".codex-cage", "runs", "run-review-stdout", "review-prompt-0.md"),
+      "utf8",
+    );
 
     assert.equal(result.status, "succeeded");
     assert.doesNotMatch(reviewLog, /^\$ printf/);
+    assert.match(
+      reviewPrompt,
+      /Target review policy: missing\. Proceed with built-in review rules\./,
+    );
     assert.deepEqual(JSON.parse(reviewLog), {
       decision: "pass",
       summary: "No blocking issues.",
@@ -183,7 +191,25 @@ test("runCodexCage executes the happy path and records a successful run", async 
 verify:
   - npm test
 `);
-  await writeFile(join(cwd, "AGENTS.md"), "Always write focused tests.\n", "utf8");
+  await mkdir(join(cwd, ".codex-cage"), { recursive: true });
+  await mkdir(join(cwd, ".github"), { recursive: true });
+  await writeFile(join(cwd, "AGENTS.md"), "Do not prompt-inject AGENTS.\n", "utf8");
+  await writeFile(
+    join(cwd, ".codex-cage", "instructions.md"),
+    "Do not prompt-inject cage instructions.\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".codex-cage", "review-policy.md"),
+    "Do not prompt-inject review policy contents.\n",
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, ".github", "copilot-instructions.md"),
+    "Do not prompt-inject Copilot.\n",
+    "utf8",
+  );
+  await writeFile(join(cwd, "CLAUDE.md"), "Do not prompt-inject Claude.\n", "utf8");
   const events: string[] = [];
   const sandboxOptions: DockerSandboxOptions[] = [];
   const shell = shellRunner(
@@ -203,6 +229,7 @@ verify:
   );
   const published: PublishSuccessfulRunInput[] = [];
   let reviewIssueContext = "";
+  let reviewPolicyStatus = "";
 
   try {
     const result = await runCodexCage(
@@ -230,6 +257,7 @@ verify:
         createShellRunner: () => shell,
         runIndependentReview: async (input) => {
           reviewIssueContext = input.issueContext;
+          reviewPolicyStatus = input.reviewPolicyStatus ?? "";
           return passingReview();
         },
         publishSuccessfulRun: async (input) => {
@@ -274,20 +302,28 @@ verify:
       join(runDirectory, "prompt-context.json"),
       "utf8",
     );
-    const instructions = await readFile(join(runDirectory, "instructions.md"), "utf8");
 
     assert.equal(details.run.status, "succeeded");
     assert.equal(details.run.prUrl, "https://github.com/jhowliu/codex-cage/pull/26");
-    assert.match(implementationPrompt, /Repository instructions:/);
-    assert.match(implementationPrompt, /Always write focused tests/);
-    assert.match(reviewIssueContext, /Repository instructions:/);
+    assert.match(implementationPrompt, /native Codex AGENTS\.md/);
+    assert.doesNotMatch(implementationPrompt, /Do not prompt-inject/);
+    assert.doesNotMatch(reviewIssueContext, /Do not prompt-inject/);
     assert.match(reviewPrompt, /Verification summary:/);
+    assert.match(
+      reviewPrompt,
+      /Target review policy: present at \/workspace\/\.codex-cage\/review-policy\.md/,
+    );
+    assert.doesNotMatch(reviewPrompt, /Do not prompt-inject/);
+    assert.match(reviewPolicyStatus, /Target review policy: present/);
     assert.match(
       shell.commands.find((command) => command.includes("codex exec")) ?? "",
       /--sandbox 'workspace-write'/,
     );
-    assert.match(promptContext, /AGENTS\.md/);
-    assert.match(instructions, /Always write focused tests/);
+    assert.match(promptContext, /"status": "present"/);
+    assert.doesNotMatch(promptContext, /Do not prompt-inject/);
+    await assert.rejects(() => readFile(join(runDirectory, "instructions.md"), "utf8"), {
+      code: "ENOENT",
+    });
     assert.deepEqual(
       details.phases.map((phase) => phase.name),
       ["preflight", "cloning", "implement", "verify", "review", "pr"],
