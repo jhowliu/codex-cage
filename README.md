@@ -4,6 +4,10 @@ Codex Cage is a lightweight CLI for running Codex against issue-driven work in a
 
 Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
 
+## Demo
+
+https://github.com/user-attachments/assets/66e43421-9aa6-4024-8f82-6f0e9d385d6f
+
 ## Install
 
 Requirements:
