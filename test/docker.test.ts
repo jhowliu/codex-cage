@@ -10,6 +10,7 @@ import {
   dockerRunArgs,
   networkCreateArgs,
   runtimeImageName,
+  unauthenticatedRemoteUrl,
   volumeCreateArgs,
   type DockerCommandResult,
   type DockerCommandRunner,
@@ -62,6 +63,19 @@ test("dockerResourceNames creates stable Docker-safe resource names", () => {
   assert.equal(runtimeImageName("RUN 123/ABC"), "codex-cage/runtime-run-123-abc:latest");
 });
 
+test("unauthenticatedRemoteUrl strips HTTPS credentials", () => {
+  assert.equal(
+    unauthenticatedRemoteUrl(
+      "https://x-access-token:ghp_secret%40value@github.com/jhowliu/codex-cage.git",
+    ),
+    "https://github.com/jhowliu/codex-cage.git",
+  );
+  assert.equal(
+    unauthenticatedRemoteUrl("git@github.com:jhowliu/codex-cage.git"),
+    "git@github.com:jhowliu/codex-cage.git",
+  );
+});
+
 test("volume and network resources carry managed labels", () => {
   assert.deepEqual(volumeCreateArgs("workspace", { "codex-cage.run_id": "run-1" }), [
     "volume",
@@ -90,7 +104,7 @@ test("dockerRunArgs uses volume workspace and avoids host-sensitive mounts", () 
     volumeName: "codex-cage-run-1-workspace",
     workspacePath: "/workspace",
     labels: { "codex-cage.run_id": "run-1" },
-    env: { GITHUB_TOKEN: "secret", OPENAI_API_KEY: "secret" },
+    env: { APP_ENV: "test" },
     command: "npm test",
   });
   const joinedArgs = args.join(" ");
@@ -111,6 +125,26 @@ test("dockerRunArgs uses volume workspace and avoids host-sensitive mounts", () 
   );
   assert.equal(joinedArgs.includes("secret"), false);
   assert.deepEqual(args.slice(-3), ["sh", "-lc", "npm test"]);
+});
+
+test("dockerRunArgs wires GitHub auth through command-scoped askpass", () => {
+  const args = dockerRunArgs({
+    image: defaultSandboxImage,
+    networkName: "codex-cage-run-1",
+    volumeName: "codex-cage-run-1-workspace",
+    workspacePath: "/workspace",
+    labels: { "codex-cage.run_id": "run-1" },
+    env: { GITHUB_TOKEN: "secret" },
+    command: "git fetch origin main",
+  });
+  const command = args.at(-1) ?? "";
+  const joinedArgs = args.join(" ");
+
+  assert.equal(joinedArgs.includes("secret"), false);
+  assert.equal(joinedArgs.includes("--env GITHUB_TOKEN"), true);
+  assert.match(command, /GIT_ASKPASS/);
+  assert.match(command, /\$\{GITHUB_TOKEN:-\$\{GH_TOKEN:-\}\}/);
+  assert.match(command, /git fetch origin main/);
 });
 
 test("dockerRunArgs can mount only the Codex auth file for OAuth fallback", () => {
@@ -138,6 +172,65 @@ test("dockerRunArgs can mount only the Codex auth file for OAuth fallback", () =
   assert.match(args.at(-1) ?? "", /cp \/tmp\/codex-auth\.json/);
   assert.match(args.at(-1) ?? "", /codex exec hello/);
   assert.equal(joinedArgs.includes("secret"), false);
+});
+
+test("dockerRunArgs omits credential env and OAuth mount for setup and verify commands", () => {
+  for (const command of ["npm install", "npm test"]) {
+    const args = dockerRunArgs({
+      image: defaultSandboxImage,
+      networkName: "codex-cage-run-1",
+      volumeName: "codex-cage-run-1-workspace",
+      workspacePath: "/workspace",
+      labels: { "codex-cage.run_id": "run-1" },
+      env: { APP_ENV: "test" },
+      command,
+    });
+    const joinedArgs = args.join(" ");
+
+    assert.equal(joinedArgs.includes("GITHUB_TOKEN"), false);
+    assert.equal(joinedArgs.includes("GH_TOKEN"), false);
+    assert.equal(joinedArgs.includes("OPENAI_API_KEY"), false);
+    assert.equal(joinedArgs.includes("/tmp/codex-auth.json"), false);
+    assert.deepEqual(args.slice(-3), ["sh", "-lc", command]);
+  }
+});
+
+test("createDockerSandbox uses command-scoped env and Codex auth mounts", async () => {
+  const runner = recordingRunner();
+  const sandbox = createDockerSandbox(
+    {
+      runId: "run-1",
+      cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+      env: {
+        GITHUB_TOKEN: "token",
+        OPENAI_API_KEY: "openai",
+      },
+    },
+    runner,
+  );
+
+  await sandbox.create();
+  await sandbox.cloneRepository();
+  await sandbox.runCommand("npm test", { env: { APP_ENV: "test" } });
+  await sandbox.runCommand("codex exec hello", {
+    env: { OPENAI_API_KEY: "openai" },
+    codexAuthFilePath: "/Users/example/.codex/auth.json",
+  });
+
+  const verifyArgs = runner.calls[3]?.args ?? [];
+  const implementArgs = runner.calls[4]?.args ?? [];
+
+  assert.deepEqual(runner.calls[2]?.options.env, {
+    GITHUB_TOKEN: "token",
+    OPENAI_API_KEY: "openai",
+  });
+  assert.deepEqual(runner.calls[3]?.options.env, { APP_ENV: "test" });
+  assert.deepEqual(runner.calls[4]?.options.env, { OPENAI_API_KEY: "openai" });
+  assert.equal(verifyArgs.join(" ").includes("OPENAI_API_KEY"), false);
+  assert.equal(verifyArgs.join(" ").includes("GITHUB_TOKEN"), false);
+  assert.equal(verifyArgs.join(" ").includes("/tmp/codex-auth.json"), false);
+  assert.equal(implementArgs.join(" ").includes("--env OPENAI_API_KEY"), true);
+  assert.equal(implementArgs.join(" ").includes("/tmp/codex-auth.json"), true);
 });
 
 test("dockerBuildArgs labels per-run runtime images", () => {
@@ -219,9 +312,21 @@ test("createDockerSandbox creates resources, clones into volume, runs commands, 
     runner.calls[2]?.args.some((arg) => arg.includes("git clone")),
     true,
   );
+  assert.match(
+    runner.calls[2]?.args.at(-1) ?? "",
+    /git clone 'https:\/\/github\.com\/jhowliu\/codex-cage\.git' \./,
+  );
+  assert.match(
+    runner.calls[2]?.args.at(-1) ?? "",
+    /git remote set-url origin 'https:\/\/github\.com\/jhowliu\/codex-cage\.git'/,
+  );
+  assert.doesNotMatch(
+    (runner.calls[2]?.args.at(-1) ?? "").split("git remote set-url origin").at(1) ?? "",
+    /token/,
+  );
   assert.equal(runner.calls[3]?.args.at(-1), "npm test");
   assert.deepEqual(runner.calls[2]?.options.env, { GITHUB_TOKEN: "token" });
-  assert.deepEqual(runner.calls[3]?.options.env, { GITHUB_TOKEN: "token" });
+  assert.deepEqual(runner.calls[3]?.options.env, {});
   assert.deepEqual(runner.calls[4]?.args, ["network", "rm", "codex-cage-run-1"]);
   assert.deepEqual(runner.calls[5]?.args, ["volume", "rm", "codex-cage-run-1-workspace"]);
 });
