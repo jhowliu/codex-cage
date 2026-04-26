@@ -128,9 +128,13 @@ export function createSecretRedactor(
 
     for (const [name, value] of secretEntries) {
       redacted = redacted.replaceAll(value, `[REDACTED:${name}]`);
+      redacted = redacted.replaceAll(encodeURIComponent(value), `[REDACTED:${name}]`);
     }
 
-    return redacted;
+    return redacted.replace(
+      /https:\/\/x-access-token:[^@\s]+@github\.com/g,
+      "https://x-access-token:[REDACTED]@github.com",
+    );
   };
 }
 

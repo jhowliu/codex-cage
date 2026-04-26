@@ -100,12 +100,10 @@ export function createAuthenticatedRepo(
     );
   }
 
-  const encodedToken = encodeURIComponent(githubToken);
-
   return {
     repo,
-    cloneUrl: `https://x-access-token:${encodedToken}@github.com/${repo.fullName}.git`,
-    redactedCloneUrl: `https://x-access-token:[REDACTED]@github.com/${repo.fullName}.git`,
+    cloneUrl: `https://github.com/${repo.fullName}.git`,
+    redactedCloneUrl: `https://github.com/${repo.fullName}.git`,
   };
 }
 
@@ -117,7 +115,15 @@ export function redactGithubToken(
     return value;
   }
 
-  return value.split(githubToken).join("[REDACTED]");
+  return value
+    .split(githubToken)
+    .join("[REDACTED]")
+    .split(encodeURIComponent(githubToken))
+    .join("[REDACTED]")
+    .replace(
+      /https:\/\/x-access-token:[^@\s]+@github\.com/g,
+      "https://x-access-token:[REDACTED]@github.com",
+    );
 }
 
 async function readCwdRepo(

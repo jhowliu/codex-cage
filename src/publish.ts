@@ -1,4 +1,7 @@
 import { execa } from "execa";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { IssueContext } from "./issue.js";
 import type { GithubRepo } from "./repo.js";
 
@@ -14,6 +17,7 @@ export type CommandRunner = {
 
 export type CommandRunOptions = {
   cwd?: string | undefined;
+  env?: Record<string, string> | undefined;
 };
 
 export type PublishMetadata = {
@@ -34,6 +38,7 @@ export type PublishSuccessfulRunInput = {
   metadata: PublishMetadata;
   branchName?: string | undefined;
   draft?: boolean | undefined;
+  env?: Record<string, string> | undefined;
   git?: CommandRunner | undefined;
   gh?: CommandRunner | undefined;
 };
@@ -62,31 +67,13 @@ export class BranchExistsError extends Error {
 
 export const execaGitRunner: CommandRunner = {
   async run(args: string[], options: CommandRunOptions = {}): Promise<CommandResult> {
-    const result =
-      options.cwd === undefined
-        ? await execa("git", args, { reject: false })
-        : await execa("git", args, {
-            cwd: options.cwd,
-            reject: false,
-          });
-
-    return {
-      exitCode: result.exitCode ?? 0,
-      stdout: result.stdout,
-      stderr: result.stderr,
-    };
+    return await runWithTemporaryGitHubAskpass("git", args, options);
   },
 };
 
 export const execaGhRunner: CommandRunner = {
   async run(args: string[], options: CommandRunOptions = {}): Promise<CommandResult> {
-    const result =
-      options.cwd === undefined
-        ? await execa("gh", args, { reject: false })
-        : await execa("gh", args, {
-            cwd: options.cwd,
-            reject: false,
-          });
+    const result = await execa("gh", args, execaOptions(options));
 
     return {
       exitCode: result.exitCode ?? 0,
@@ -112,7 +99,7 @@ export async function publishSuccessfulRun(
     throw new NoDiffError();
   }
 
-  if (await branchExists({ cwd: input.cwd, branchName, git })) {
+  if (await branchExists({ cwd: input.cwd, branchName, git, env: input.env })) {
     throw new BranchExistsError(branchName);
   }
 
@@ -128,7 +115,7 @@ export async function publishSuccessfulRun(
   await runRequired(git, ["config", "user.email", input.authorEmail], input.cwd);
   await runRequired(git, ["add", "--all"], input.cwd);
   await runRequired(git, ["commit", "-m", commitMessage], input.cwd);
-  await runRequired(git, ["push", "-u", "origin", branchName], input.cwd);
+  await runRequired(git, ["push", "-u", "origin", branchName], input.cwd, input.env);
 
   const prCreateArgs = [
     "pr",
@@ -149,7 +136,7 @@ export async function publishSuccessfulRun(
     prCreateArgs.push("--draft");
   }
 
-  const prResult = await runRequired(gh, prCreateArgs, input.cwd);
+  const prResult = await runRequired(gh, prCreateArgs, input.cwd, input.env);
   const prUrl = prResult.stdout.trim();
 
   return {
@@ -191,6 +178,7 @@ export async function hasPublishableChanges(input: {
 export async function branchExists(input: {
   cwd: string;
   branchName: string;
+  env?: Record<string, string> | undefined;
   git?: CommandRunner;
 }): Promise<boolean> {
   const git = input.git ?? execaGitRunner;
@@ -205,7 +193,7 @@ export async function branchExists(input: {
 
   const remote = await git.run(
     ["ls-remote", "--exit-code", "--heads", "origin", input.branchName],
-    { cwd: input.cwd },
+    { cwd: input.cwd, env: input.env },
   );
 
   return remote.exitCode === 0;
@@ -273,12 +261,85 @@ async function runRequired(
   runner: CommandRunner,
   args: string[],
   cwd: string,
+  env?: Record<string, string> | undefined,
 ): Promise<CommandResult> {
-  const result = await runner.run(args, { cwd });
+  const result = await runner.run(args, { cwd, env });
 
   if (result.exitCode !== 0) {
     throw new Error(`Command failed: ${args.join(" ")}\n${result.stderr}`);
   }
 
   return result;
+}
+
+async function runWithTemporaryGitHubAskpass(
+  executable: string,
+  args: string[],
+  options: CommandRunOptions,
+): Promise<CommandResult> {
+  const token = options.env?.GITHUB_TOKEN ?? options.env?.GH_TOKEN;
+
+  if (token === undefined || token === "") {
+    const result = await execa(executable, args, execaOptions(options));
+
+    return commandResultFromExeca(result);
+  }
+
+  const tempDir = await mkdtemp(join(tmpdir(), "codex-cage-git-auth-"));
+  const askpassPath = join(tempDir, "askpass.sh");
+
+  try {
+    await writeFile(
+      askpassPath,
+      [
+        "#!/bin/sh",
+        'case "$1" in',
+        '*Username*) printf "%s\\n" "x-access-token" ;;',
+        '*Password*) printf "%s\\n" "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ;;',
+        '*) printf "%s\\n" ;;',
+        "esac",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(askpassPath, 0o700);
+
+    const result = await execa(executable, args, {
+      ...execaOptions({ cwd: options.cwd }),
+      env: {
+        ...options.env,
+        GIT_ASKPASS: askpassPath,
+        GIT_TERMINAL_PROMPT: "0",
+      },
+      reject: false,
+    });
+
+    return commandResultFromExeca(result);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function execaOptions(options: CommandRunOptions): {
+  cwd?: string;
+  env?: Record<string, string>;
+  reject: false;
+} {
+  return {
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+    ...(options.env === undefined ? {} : { env: options.env }),
+    reject: false,
+  };
+}
+
+function commandResultFromExeca(result: {
+  exitCode?: number;
+  stdout?: unknown;
+  stderr?: unknown;
+}): CommandResult {
+  return {
+    exitCode: result.exitCode ?? 0,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+    stderr: typeof result.stderr === "string" ? result.stderr : "",
+  };
 }

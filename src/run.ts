@@ -39,6 +39,7 @@ import {
   NoDiffError,
   publishSuccessfulRun,
   type CommandResult,
+  type CommandRunOptions,
   type CommandRunner,
 } from "./publish.js";
 import {
@@ -679,6 +680,7 @@ async function runImplementationLoop(input: {
       input.onProgress,
       async () => {
         let result;
+        const publishCredentials = runtimeCommandCredentials("publish", input.context);
 
         try {
           result = await input.publish({
@@ -690,6 +692,7 @@ async function runImplementationLoop(input: {
             authorEmail: input.context.config.git.author_email,
             branchName: input.context.branchName,
             draft: input.context.draft,
+            env: publishCredentials.env,
             metadata: {
               runId: input.context.runId,
               summary: `Implemented ${input.context.issue.identifier}: ${input.context.issue.title}`,
@@ -697,23 +700,15 @@ async function runImplementationLoop(input: {
               reviewStatus: "Independent review passed.",
               risks: [],
             },
-            git: shellCommandRunner(
-              input.shell,
-              "git",
-              runtimeCommandCredentials("publish", input.context),
-            ),
-            gh: shellCommandRunner(
-              input.shell,
-              "gh",
-              runtimeCommandCredentials("publish", input.context),
-            ),
+            git: shellCommandRunner(input.shell, "git", publishCredentials),
+            gh: shellCommandRunner(input.shell, "gh", publishCredentials),
           });
         } catch (error) {
           if (error instanceof NoDiffError) {
             throw error;
           }
 
-          throw new RunFailureError("pr_failed", formatError(error));
+          throw new RunFailureError("pr_failed", input.redactor(formatError(error)));
         }
 
         return {
@@ -895,8 +890,23 @@ function shellCommandRunner(
   options?: DockerCommandOptions,
 ): CommandRunner {
   return {
-    async run(args: string[]): Promise<CommandResult> {
-      return await shell.run([executable, ...args].map(shellQuote).join(" "), options);
+    async run(
+      args: string[],
+      runOptions: CommandRunOptions = {},
+    ): Promise<CommandResult> {
+      const env = {
+        ...(options?.env ?? {}),
+        ...(runOptions.env ?? {}),
+      };
+      const commandOptions: DockerCommandOptions = {
+        ...options,
+        ...(Object.keys(env).length === 0 ? {} : { env }),
+      };
+
+      return await shell.run(
+        [executable, ...args].map(shellQuote).join(" "),
+        commandOptions,
+      );
     },
   };
 }

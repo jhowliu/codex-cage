@@ -148,10 +148,8 @@ verify:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl:
-            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl:
-            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,
@@ -261,10 +259,8 @@ verify:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl:
-            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl:
-            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
         }),
         createDockerSandbox: (options: DockerSandboxOptions) => {
           sandboxOptions.push(options);
@@ -312,6 +308,10 @@ verify:
     });
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
+    assert.deepEqual(published[0]?.env, {
+      GH_TOKEN: "token-value",
+      GITHUB_TOKEN: "token-value",
+    });
     assert.deepEqual(reviewEnv, {});
 
     const setupIndex = shell.commands.findIndex((command) => command === "npm install");
@@ -405,6 +405,74 @@ verify:
   }
 });
 
+test("runCodexCage redacts credential-bearing publish failures in artifacts", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+`);
+  const events: string[] = [];
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      [
+        "git add --intent-to-add",
+        commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+      ],
+    ]),
+  );
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-publish-redact",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async () => {
+          throw new Error(
+            "push failed: https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+          );
+        },
+      },
+    );
+
+    const runDirectory = join(cwd, ".codex-cage", "runs", "run-publish-redact");
+    const prLog = await readFile(join(runDirectory, "pr.log"), "utf8");
+    const summary = await readFile(join(runDirectory, "summary.md"), "utf8");
+
+    assert.deepEqual(result, {
+      runId: "run-publish-redact",
+      status: "failed",
+      failureCode: "pr_failed",
+      prUrl: null,
+    });
+    assert.doesNotMatch(prLog, /token-value/);
+    assert.doesNotMatch(summary, /token-value/);
+    assert.match(prLog, /x-access-token:\[REDACTED\]@github\.com/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runCodexCage builds configured runtime Dockerfiles before cloning", async () => {
   const cwd = await createProject(`
 verify:
@@ -445,10 +513,8 @@ runtime:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl:
-            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl:
-            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
         }),
         buildRuntimeImage: async (options) => {
           events.push(`build:${options.dockerfilePath}:${options.contextPath}`);
@@ -525,10 +591,8 @@ runtime:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl:
-            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl:
-            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
         }),
         buildRuntimeImage: async () => {
           events.push("build");
@@ -590,10 +654,8 @@ agent:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl:
-            "https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl:
-            "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,

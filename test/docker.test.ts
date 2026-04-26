@@ -320,6 +320,7 @@ test("createDockerSandbox creates resources, clones into volume, runs commands, 
     runner.calls[2]?.args.at(-1) ?? "",
     /git remote set-url origin 'https:\/\/github\.com\/jhowliu\/codex-cage\.git'/,
   );
+  assert.doesNotMatch(runner.calls[2]?.args.at(-1) ?? "", /x-access-token:[^@\s]+@/);
   assert.doesNotMatch(
     (runner.calls[2]?.args.at(-1) ?? "").split("git remote set-url origin").at(1) ?? "",
     /token/,

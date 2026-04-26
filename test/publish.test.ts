@@ -18,6 +18,7 @@ import type { GithubRepo } from "../src/repo.js";
 type RecordedCall = {
   args: string[];
   cwd: string | undefined;
+  env: Record<string, string> | undefined;
 };
 
 function result(stdout = "", exitCode = 0, stderr = ""): CommandResult {
@@ -32,7 +33,7 @@ function recordingRunner(results: CommandResult[]): CommandRunner & {
   return {
     calls,
     async run(args, options): Promise<CommandResult> {
-      calls.push({ args, cwd: options?.cwd });
+      calls.push({ args, cwd: options?.cwd, env: options?.env });
       const next = results.shift();
 
       if (next === undefined) {
@@ -166,6 +167,7 @@ test("publishSuccessfulRun creates one branch, one commit, one push, and one rea
     authorName: "Codex Cage",
     authorEmail: "codex-cage@users.noreply.github.com",
     metadata,
+    env: { GITHUB_TOKEN: "token-value" },
     git,
     gh,
   });
@@ -194,6 +196,9 @@ test("publishSuccessfulRun creates one branch, one commit, one push, and one rea
       ["push", "-u", "origin", "codex-cage/gh-11-run-1234567890ab"],
     ],
   );
+  assert.deepEqual(git.calls[2]?.env, { GITHUB_TOKEN: "token-value" });
+  assert.deepEqual(git.calls[8]?.env, { GITHUB_TOKEN: "token-value" });
+  assert.deepEqual(gh.calls[0]?.env, { GITHUB_TOKEN: "token-value" });
   assert.equal(
     git.calls.some(
       (call) => call.args.includes("--force") || call.args.includes("--force-with-lease"),
