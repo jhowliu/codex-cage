@@ -2,6 +2,7 @@
   "name": "codex-cage",
   "version": "0.1.0",
   "description": "Run Codex in an isolated Docker workspace and publish verified PRs from issue links.",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "codex-cage": "./dist/src/cli.js"
