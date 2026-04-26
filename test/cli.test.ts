@@ -12,10 +12,16 @@ import { openRunStore } from "../src/state.js";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(testDir, "..", "src", "cli.js");
 
+function defaultCliEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+  delete env.FORCE_COLOR;
+  return env;
+}
+
 function runCli(args: string[], cwd?: string, env?: NodeJS.ProcessEnv) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
-    env: env ?? process.env,
+    env: env ?? defaultCliEnv(),
     encoding: "utf8",
   });
 }
@@ -180,7 +186,11 @@ test("runs show can emit color when forced", async () => {
     });
     store.close();
 
-    const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: "1" };
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      FORCE_COLOR: "1",
+      TERM: "xterm-256color",
+    };
     delete env.NO_COLOR;
 
     const showResult = runCli(["runs", "show", "run-color"], cwd, env);
