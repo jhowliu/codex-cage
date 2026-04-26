@@ -71,8 +71,10 @@ test("createSecretRedactor replaces known secret values and ignores empty values
   });
 
   assert.equal(
-    redact("clone with ghp_secret but keep ordinary text"),
-    "clone with [REDACTED:GITHUB_TOKEN] but keep ordinary text",
+    redact(
+      "clone with ghp_secret and https://x-access-token:ghp_secret%40encoded@github.com but keep ordinary text",
+    ),
+    "clone with [REDACTED:GITHUB_TOKEN] and https://x-access-token:[REDACTED]@github.com but keep ordinary text",
   );
 });
 

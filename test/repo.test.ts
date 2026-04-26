@@ -107,19 +107,16 @@ test("resolveTargetRepo fails when no repo source exists", async () => {
   );
 });
 
-test("createAuthenticatedRepo uses token HTTPS clone URL and redacted display URL", () => {
+test("createAuthenticatedRepo validates token but returns tokenless HTTPS clone URL", () => {
   const authenticatedRepo = createAuthenticatedRepo(
     parseGithubRepo("jhowliu/codex-cage"),
     "ghp_secret",
   );
 
-  assert.equal(
-    authenticatedRepo.cloneUrl,
-    "https://x-access-token:ghp_secret@github.com/jhowliu/codex-cage.git",
-  );
+  assert.equal(authenticatedRepo.cloneUrl, "https://github.com/jhowliu/codex-cage.git");
   assert.equal(
     authenticatedRepo.redactedCloneUrl,
-    "https://x-access-token:[REDACTED]@github.com/jhowliu/codex-cage.git",
+    "https://github.com/jhowliu/codex-cage.git",
   );
 });
 
@@ -132,7 +129,10 @@ test("createAuthenticatedRepo requires GITHUB_TOKEN", () => {
 
 test("redactGithubToken removes token values from logs", () => {
   assert.equal(
-    redactGithubToken("push https://x-access-token:ghp_secret@github.com", "ghp_secret"),
+    redactGithubToken(
+      "push https://x-access-token:ghp_secret%40value@github.com",
+      "ghp_secret@value",
+    ),
     "push https://x-access-token:[REDACTED]@github.com",
   );
 });
