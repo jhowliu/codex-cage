@@ -4,6 +4,8 @@ Codex Cage runs issue-driven Codex work in Docker-owned workspaces. The CLI is b
 
 The `run` command wires those slices into one orchestration loop. It fetches issue context, clones into a Docker volume, runs setup and verification commands, feeds failures back into Codex for bounded retries, runs an independent read-only review, blocks secret-bearing diffs, and publishes a PR only after all gates pass.
 
+For concise copy-pasteable commands, see the [CLI examples guide](cli-examples.md).
+
 ## Install
 
 From this repository:
