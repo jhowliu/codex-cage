@@ -41,6 +41,7 @@ import {
   type CommandResult,
   type CommandRunOptions,
   type CommandRunner,
+  type PublishSuccessfulRunResult,
 } from "./publish.js";
 import {
   buildPromptContext,
@@ -74,6 +75,7 @@ export type RunCommandOptions = {
   base?: string | undefined;
   model?: string | undefined;
   draft?: boolean | undefined;
+  publish?: boolean | undefined;
 };
 
 export type RunCodexCageResult = {
@@ -94,7 +96,7 @@ export type RunProgressEvent =
       artifactDir: string;
     }
   | {
-      type: "phase_started" | "phase_passed" | "phase_failed";
+      type: "phase_started" | "phase_passed" | "phase_failed" | "phase_skipped";
       runId: string;
       phase: PhaseName;
       logPath: string;
@@ -148,6 +150,7 @@ type RuntimeContext = {
   baseBranch: string;
   model: string;
   draft: boolean;
+  publish: boolean;
   runId: string;
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
@@ -418,6 +421,7 @@ async function prepareRuntimeContext(
   const baseBranch = options.base ?? configResult.config.git.base;
   const model = options.model ?? configResult.config.agent.model;
   const draft = options.draft ?? configResult.config.pr.draft;
+  const publish = options.publish ?? configResult.config.pr.publish;
   const runId = dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
   const runtimeImage = {
@@ -441,6 +445,7 @@ async function prepareRuntimeContext(
     baseBranch,
     model,
     draft,
+    publish,
     runId,
     branchName,
     runtimeImage,
@@ -672,66 +677,94 @@ async function runImplementationLoop(input: {
       throw new RunFailureError("review_blocking", reviewResult.nextAction.feedback);
     }
 
-    await input.store.updateRunStatus(input.context.runId, { status: "creating_pr" });
-    const publishResult = await runPhase(
-      input.store,
-      input.context.runId,
-      "pr",
-      input.onProgress,
-      async () => {
-        let result;
-        const publishCredentials = runtimeCommandCredentials("publish", input.context);
+    const finalPatch = await readCurrentDiff(input.shell);
+    if (finalPatch.trim() === "") {
+      throw new NoDiffError();
+    }
 
-        try {
-          result = await input.publish({
-            cwd: input.context.cwd,
-            repo: input.context.repoResolution.repo,
-            issue: input.context.issue,
-            baseBranch: input.context.baseBranch,
-            authorName: input.context.config.git.author_name,
-            authorEmail: input.context.config.git.author_email,
-            branchName: input.context.branchName,
-            draft: input.context.draft,
-            env: publishCredentials.env,
-            metadata: {
-              runId: input.context.runId,
-              summary: `Implemented ${input.context.issue.identifier}: ${input.context.issue.title}`,
-              verification: verification.items,
-              reviewStatus: "Independent review passed.",
-              risks: [],
-            },
-            git: shellCommandRunner(input.shell, "git", publishCredentials),
-            gh: shellCommandRunner(input.shell, "gh", publishCredentials),
-          });
-        } catch (error) {
-          if (error instanceof NoDiffError) {
-            throw error;
+    let publishResult: PublishSuccessfulRunResult | null = null;
+
+    if (input.context.publish) {
+      await input.store.updateRunStatus(input.context.runId, { status: "creating_pr" });
+      publishResult = await runPhase(
+        input.store,
+        input.context.runId,
+        "pr",
+        input.onProgress,
+        async () => {
+          let result;
+          const publishCredentials = runtimeCommandCredentials("publish", input.context);
+
+          try {
+            result = await input.publish({
+              cwd: input.context.cwd,
+              repo: input.context.repoResolution.repo,
+              issue: input.context.issue,
+              baseBranch: input.context.baseBranch,
+              authorName: input.context.config.git.author_name,
+              authorEmail: input.context.config.git.author_email,
+              branchName: input.context.branchName,
+              draft: input.context.draft,
+              env: publishCredentials.env,
+              metadata: {
+                runId: input.context.runId,
+                summary: `Implemented ${input.context.issue.identifier}: ${input.context.issue.title}`,
+                verification: verification.items,
+                reviewStatus: "Independent review passed.",
+                risks: [],
+              },
+              git: shellCommandRunner(input.shell, "git", publishCredentials),
+              gh: shellCommandRunner(input.shell, "gh", publishCredentials),
+            });
+          } catch (error) {
+            if (error instanceof NoDiffError) {
+              throw error;
+            }
+
+            throw new RunFailureError("pr_failed", input.redactor(formatError(error)));
           }
 
-          throw new RunFailureError("pr_failed", input.redactor(formatError(error)));
-        }
+          return {
+            log: input.redactor(JSON.stringify(result, null, 2)),
+            value: result,
+          };
+        },
+      );
+    } else {
+      await skipPhase(
+        input.store,
+        input.context.runId,
+        "pr",
+        input.onProgress,
+        "Publish disabled. No branch was pushed and no PR was created.",
+      );
+    }
 
-        return {
-          log: input.redactor(JSON.stringify(result, null, 2)),
-          value: result,
-        };
+    await writeJsonArtifact(
+      input.store,
+      input.context.runId,
+      "pr.json",
+      publishResult ?? {
+        published: false,
+        branchName: input.context.branchName,
+        prUrl: null,
+        reason: "publish_disabled",
       },
     );
-
-    await writeJsonArtifact(input.store, input.context.runId, "pr.json", publishResult);
-    await input.store.writeArtifact(
-      input.context.runId,
-      "final.patch",
-      await readCurrentDiff(input.shell),
-    );
+    await input.store.writeArtifact(input.context.runId, "final.patch", finalPatch);
     await input.store.writeArtifact(
       input.context.runId,
       "summary.md",
-      `# ${input.context.runId}\n\nPR: ${publishResult.prUrl}\n`,
+      publishResult === null
+        ? `# ${input.context.runId}\n\nPR: not created (publish disabled)\n\nFinal patch: ${input.store.artifactPath(
+            input.context.runId,
+            "final.patch",
+          )}\n`
+        : `# ${input.context.runId}\n\nPR: ${publishResult.prUrl}\n`,
     );
     await input.store.updateRunStatus(input.context.runId, {
       status: "succeeded",
-      prUrl: publishResult.prUrl,
+      prUrl: publishResult?.prUrl ?? null,
       finishedAt: new Date(),
     });
 
@@ -739,7 +772,7 @@ async function runImplementationLoop(input: {
       runId: input.context.runId,
       status: "succeeded",
       failureCode: null,
-      prUrl: publishResult.prUrl,
+      prUrl: publishResult?.prUrl ?? null,
     };
   }
 
@@ -845,6 +878,21 @@ async function runPhase<TValue = undefined>(
     onProgress({ type: "phase_failed", runId, phase: name, logPath });
     throw error;
   }
+}
+
+async function skipPhase(
+  store: RunStore,
+  runId: string,
+  name: PhaseName,
+  onProgress: (event: RunProgressEvent) => void,
+  log: string,
+): Promise<void> {
+  const logPath = store.artifactPath(runId, `${name}.log`);
+  onProgress({ type: "phase_started", runId, phase: name, logPath });
+  const phase = await store.startPhase({ runId, name, logPath });
+  await store.writeArtifact(runId, `${name}.log`, log);
+  await store.finishPhase({ phaseId: phase.id, status: "skipped", logPath });
+  onProgress({ type: "phase_skipped", runId, phase: name, logPath });
 }
 
 function createDockerShellRunner(

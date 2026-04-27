@@ -130,6 +130,85 @@ test("run keeps the --issue option for compatibility", async () => {
   ]);
 });
 
+test("run accepts --no-publish", async () => {
+  const calls: RunCommandOptions[] = [];
+  const originalConsoleLog = console.log;
+  const program = createCli({
+    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+      calls.push(input);
+      return {
+        runId: "run-cli-test",
+        status: "succeeded",
+        failureCode: null,
+        prUrl: null,
+      };
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = () => undefined;
+
+  try {
+    await program.parseAsync(
+      ["run", "https://github.com/jhowliu/codex-cage/issues/35", "--no-publish"],
+      { from: "user" },
+    );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.deepEqual(calls, [
+    {
+      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
+      publish: false,
+    },
+  ]);
+});
+
+test("run reports a successful no-publish run without a PR", async () => {
+  const originalConsoleLog = console.log;
+  const output: string[] = [];
+  const program = createCli({
+    runCodexCage: async (_input, dependencies): Promise<RunCodexCageResult> => {
+      dependencies?.onProgress?.({
+        type: "run_started",
+        runId: "run-cli-test",
+        issueKey: "#35",
+        issueTitle: "No publish",
+        repo: "jhowliu/codex-cage",
+        branch: "codex-cage/gh-35-run-cli-test",
+        artifactDir: "/tmp/codex-cage/runs/run-cli-test",
+      });
+      return {
+        runId: "run-cli-test",
+        status: "succeeded",
+        failureCode: null,
+        prUrl: null,
+      };
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = (value?: unknown) => {
+    output.push(String(value));
+  };
+
+  try {
+    await program.parseAsync(
+      ["run", "https://github.com/jhowliu/codex-cage/issues/35", "--no-publish"],
+      { from: "user" },
+    );
+  } finally {
+    console.log = originalConsoleLog;
+  }
+
+  assert.match(output.join("\n"), /PR: not created/);
+  assert.match(output.join("\n"), /Artifacts: \/tmp\/codex-cage\/runs\/run-cli-test/);
+  assert.match(output.join("\n"), /Final patch: .*final\.patch/);
+});
+
 test("runs list and show read local run metadata", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-runs-"));
 

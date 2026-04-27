@@ -67,6 +67,12 @@ Run a GitHub issue:
 codex-cage run https://github.com/OWNER/REPO/issues/123
 ```
 
+Inspect a successful run without remote writes:
+
+```bash
+codex-cage run https://github.com/OWNER/REPO/issues/123 --no-publish
+```
+
 Run a Linear issue by passing the target GitHub repo:
 
 ```bash
@@ -90,6 +96,7 @@ Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI hel
 | `codex-cage init --dockerfile`       | Also create `.codex-cage/Dockerfile` for target repos that need custom system packages. |
 | `codex-cage run <issue-url>`         | Run the full issue-to-PR workflow for a GitHub or Linear issue.                         |
 | `codex-cage run --issue <issue-url>` | Alternate issue URL form kept for compatibility.                                        |
+| `codex-cage run --no-publish`        | Stop after final artifacts without pushing a branch or creating a PR.                   |
 | `codex-cage runs list`               | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.                        |
 | `codex-cage runs show <run-id>`      | Show run metadata, phase status, and artifact paths.                                    |
 | `codex-cage cleanup`                 | Remove stale stopped Docker resources managed by Codex Cage.                            |
