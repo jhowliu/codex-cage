@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  fetchGithubIssueContext,
   fetchIssueContext,
-  fetchLinearIssueContext,
   parseIssueUrl,
   type ParsedGithubIssueUrl,
   type ParsedLinearIssueUrl,
 } from "../src/issue.js";
+import { fetchGithubIssueContext } from "../src/issue-github.js";
+import { fetchLinearIssueContext } from "../src/issue-linear.js";
 
 type MockResponse = {
   ok: boolean;
