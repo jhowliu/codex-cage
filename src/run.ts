@@ -73,31 +73,50 @@ export async function runCodexCage(
     return await runWorkflow({
       context,
       store,
-      ...(dependencies.createDockerSandbox === undefined
-        ? {}
-        : { createDockerSandbox: dependencies.createDockerSandbox }),
-      ...(dependencies.buildRuntimeImage === undefined
-        ? {}
-        : { buildRuntimeImage: dependencies.buildRuntimeImage }),
-      ...(dependencies.createShellRunner === undefined
-        ? {}
-        : { createShellRunner: dependencies.createShellRunner }),
-      ...(dependencies.createComposeProject === undefined
-        ? {}
-        : { createComposeProject: dependencies.createComposeProject }),
-      ...(dependencies.runIndependentReview === undefined
-        ? {}
-        : { runIndependentReview: dependencies.runIndependentReview }),
-      ...(dependencies.publishSuccessfulRun === undefined
-        ? {}
-        : { publishSuccessfulRun: dependencies.publishSuccessfulRun }),
-      ...(dependencies.onProgress === undefined
-        ? {}
-        : { onProgress: dependencies.onProgress }),
+      ...runWorkflowOverridesFromDependencies(dependencies),
     });
   } finally {
     store.close();
   }
+}
+
+function runWorkflowOverridesFromDependencies(
+  dependencies: RunCodexCageDependencies,
+): Partial<
+  Pick<
+    Parameters<typeof runWorkflow>[0],
+    | "createDockerSandbox"
+    | "buildRuntimeImage"
+    | "createShellRunner"
+    | "createComposeProject"
+    | "runIndependentReview"
+    | "publishSuccessfulRun"
+    | "onProgress"
+  >
+> {
+  return {
+    ...(dependencies.createDockerSandbox === undefined
+      ? {}
+      : { createDockerSandbox: dependencies.createDockerSandbox }),
+    ...(dependencies.buildRuntimeImage === undefined
+      ? {}
+      : { buildRuntimeImage: dependencies.buildRuntimeImage }),
+    ...(dependencies.createShellRunner === undefined
+      ? {}
+      : { createShellRunner: dependencies.createShellRunner }),
+    ...(dependencies.createComposeProject === undefined
+      ? {}
+      : { createComposeProject: dependencies.createComposeProject }),
+    ...(dependencies.runIndependentReview === undefined
+      ? {}
+      : { runIndependentReview: dependencies.runIndependentReview }),
+    ...(dependencies.publishSuccessfulRun === undefined
+      ? {}
+      : { publishSuccessfulRun: dependencies.publishSuccessfulRun }),
+    ...(dependencies.onProgress === undefined
+      ? {}
+      : { onProgress: dependencies.onProgress }),
+  };
 }
 
 async function prepareRuntimeContext(
