@@ -1,3 +1,6 @@
+import { createSecretRedactor } from "./guards.js";
+import type { CommentSelection, FetchIssueContextOptions } from "./issue.js";
+
 export type CommandCredentialIntent =
   | "clone"
   | "setup"
@@ -16,9 +19,74 @@ export type CommandCredentials = {
   codexAuthFilePath?: string | undefined;
 };
 
+export type RunCredentialsInput = {
+  cwd: string;
+  readEnv: (cwd: string) => Promise<Record<string, string>>;
+  findCodexAuthFile: () => Promise<string | null>;
+};
+
+export class RunCredentials {
+  readonly secrets: Record<string, string>;
+
+  readonly #codexAuthFilePath: string | null;
+
+  constructor(input: {
+    secrets: Record<string, string>;
+    codexAuthFilePath: string | null;
+  }) {
+    this.secrets = input.secrets;
+    this.#codexAuthFilePath = input.codexAuthFilePath;
+  }
+
+  issueOptions(comments: CommentSelection): FetchIssueContextOptions {
+    const issueEnv = issueCredentialEnv(this.secrets);
+    const githubToken = githubTokenFromEnv(issueEnv);
+    const options: FetchIssueContextOptions = { comments };
+
+    if (githubToken !== undefined) {
+      options.githubToken = githubToken;
+    }
+
+    if (issueEnv.LINEAR_API_KEY !== undefined) {
+      options.linearApiKey = issueEnv.LINEAR_API_KEY;
+    }
+
+    return options;
+  }
+
+  githubToken(): string | undefined {
+    return githubTokenFromEnv(issueCredentialEnv(this.secrets));
+  }
+
+  command(intent: CommandCredentialIntent): CommandCredentials {
+    return credentialsForCommand(intent, {
+      env: this.secrets,
+      codexAuthFilePath: this.#codexAuthFilePath,
+    });
+  }
+
+  redactor(): (input: string) => string {
+    return createSecretRedactor(this.secrets);
+  }
+
+  injectedSecrets(): Record<string, string> {
+    return this.secrets;
+  }
+}
+
 const codexEnvNames = new Set(["OPENAI_API_KEY"]);
 const githubEnvNames = new Set(["GITHUB_TOKEN", "GH_TOKEN"]);
 const issueTrackerEnvNames = new Set(["LINEAR_API_KEY"]);
+
+export async function prepareRunCredentials(
+  input: RunCredentialsInput,
+): Promise<RunCredentials> {
+  const secrets = normalizeCredentialEnv(await input.readEnv(input.cwd));
+  const codexAuthFilePath =
+    secrets.OPENAI_API_KEY === undefined ? await input.findCodexAuthFile() : null;
+
+  return new RunCredentials({ secrets, codexAuthFilePath });
+}
 
 export function normalizeCredentialEnv(
   env: Record<string, string>,
@@ -92,7 +160,5 @@ function pickEnv(
   env: Record<string, string>,
   names: ReadonlySet<string>,
 ): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter(([name]) => names.has(name)),
-  );
+  return Object.fromEntries(Object.entries(env).filter(([name]) => names.has(name)));
 }

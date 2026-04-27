@@ -4,6 +4,7 @@ import {
   credentialsForCommand,
   githubTokenFromEnv,
   normalizeCredentialEnv,
+  prepareRunCredentials,
 } from "../src/credentials.js";
 
 test("normalizeCredentialEnv drops empty placeholders and mirrors GITHUB_TOKEN to GH_TOKEN", () => {
@@ -91,4 +92,67 @@ test("publish receives only GitHub auth", () => {
     GH_TOKEN: "github-secret",
   });
   assert.equal(githubTokenFromEnv(env), "github-secret");
+});
+
+test("prepareRunCredentials centralizes run-level credential policy", async () => {
+  let codexAuthLookups = 0;
+  const credentials = await prepareRunCredentials({
+    cwd: "/repo",
+    readEnv: async (cwd) => {
+      assert.equal(cwd, "/repo");
+      return {
+        OPENAI_API_KEY: "",
+        GITHUB_TOKEN: "github-secret",
+        LINEAR_API_KEY: "linear-secret",
+        APP_ENV: "test",
+      };
+    },
+    findCodexAuthFile: async () => {
+      codexAuthLookups += 1;
+      return "/host/.codex/auth.json";
+    },
+  });
+
+  assert.equal(codexAuthLookups, 1);
+  assert.deepEqual(credentials.issueOptions(3), {
+    comments: 3,
+    githubToken: "github-secret",
+    linearApiKey: "linear-secret",
+  });
+  assert.equal(credentials.githubToken(), "github-secret");
+  assert.deepEqual(credentials.command("setup").env, { APP_ENV: "test" });
+  assert.deepEqual(credentials.command("implement"), {
+    env: {},
+    codexAuthFilePath: "/host/.codex/auth.json",
+  });
+  assert.deepEqual(credentials.command("publish").env, {
+    GITHUB_TOKEN: "github-secret",
+    GH_TOKEN: "github-secret",
+  });
+  assert.equal(
+    credentials.redactor()("token github-secret"),
+    "token [REDACTED:GITHUB_TOKEN]",
+  );
+  assert.deepEqual(credentials.injectedSecrets(), {
+    GITHUB_TOKEN: "github-secret",
+    GH_TOKEN: "github-secret",
+    LINEAR_API_KEY: "linear-secret",
+    APP_ENV: "test",
+  });
+});
+
+test("prepareRunCredentials skips OAuth lookup when OpenAI API key is present", async () => {
+  const credentials = await prepareRunCredentials({
+    cwd: "/repo",
+    readEnv: async () => ({
+      OPENAI_API_KEY: "openai-secret",
+    }),
+    findCodexAuthFile: async () => {
+      throw new Error("OAuth lookup should not be used.");
+    },
+  });
+
+  assert.deepEqual(credentials.command("implement"), {
+    env: { OPENAI_API_KEY: "openai-secret" },
+  });
 });
