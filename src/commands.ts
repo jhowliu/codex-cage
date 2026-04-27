@@ -46,6 +46,10 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
+    .option(
+      "--no-publish",
+      "stop after final artifacts without pushing a branch or creating a PR",
+    )
     .action(
       async (
         issueArgument: string | undefined,
@@ -55,12 +59,14 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           base?: string;
           model?: string;
           draft?: boolean;
+          publish?: boolean;
         },
         command: Command,
       ) => {
         const issueUrl = options.issue ?? issueArgument;
         const stdoutColor = createColorizer(process.stdout);
         const stderrColor = createColorizer(process.stderr);
+        let artifactDir: string | null = null;
 
         if (issueUrl === undefined) {
           command.error("error: missing required issue URL");
@@ -73,9 +79,13 @@ export function createCli(dependencies: CliDependencies = {}): Command {
             base: options.base,
             model: options.model,
             draft: options.draft,
+            publish: options.publish === false ? false : undefined,
           }),
           {
             onProgress: (event) => {
+              if (event.type === "run_started") {
+                artifactDir = event.artifactDir;
+              }
               console.error(formatRunProgressEvent(event, stderrColor));
             },
           },
@@ -94,6 +104,18 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
         if (result.prUrl !== null) {
           console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
+        } else if (result.status === "succeeded") {
+          console.log(`${stdoutColor.label("PR")}: ${stdoutColor.muted("not created")}`);
+          if (artifactDir !== null) {
+            console.log(
+              `${stdoutColor.label("Artifacts")}: ${stdoutColor.info(artifactDir)}`,
+            );
+            console.log(
+              `${stdoutColor.label("Final patch")}: ${stdoutColor.info(
+                `${artifactDir}/final.patch`,
+              )}`,
+            );
+          }
         }
       },
     );
@@ -219,11 +241,17 @@ function formatRunProgressEvent(
       return `${color.success(`[${event.phase}] passed`)} (${event.logPath})`;
     case "phase_failed":
       return `${color.failure(`[${event.phase}] failed`)} (${event.logPath})`;
+    case "phase_skipped":
+      return `${color.warning(`[${event.phase}] skipped`)} (${event.logPath})`;
     case "run_finished":
       return event.status === "succeeded"
         ? `${color.heading("Run")} ${color.info(event.runId)} ${color.success(
             "succeeded",
-          )}${event.prUrl === null ? "" : `: ${color.link(event.prUrl)}`}`
+          )}${
+            event.prUrl === null
+              ? `: ${color.muted("no PR created")}`
+              : `: ${color.link(event.prUrl)}`
+          }`
         : `${color.heading("Run")} ${color.info(event.runId)} ${color.failure(
             "failed",
           )}: ${color.failure(event.failureCode ?? "unknown")}`;

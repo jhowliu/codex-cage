@@ -43,6 +43,7 @@ timeouts:
 
 pr:
   draft: false
+  publish: true
 
 git:
   base: main

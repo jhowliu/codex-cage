@@ -34,8 +34,9 @@ export const codexCageConfigSchema = z
     pr: z
       .object({
         draft: z.boolean().default(false),
+        publish: z.boolean().default(true),
       })
-      .default(() => ({ draft: false })),
+      .default(() => ({ draft: false, publish: true })),
     git: z
       .object({
         base: z.string().default("main"),
