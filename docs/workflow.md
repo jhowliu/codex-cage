@@ -156,6 +156,27 @@ This is clearer than embedding a long inline script in `.codex-cage.yml`, and it
 
 When a Compose file lives under `.codex-cage/`, Codex Cage still runs Compose with the target repo as the project directory. Relative bind mounts like `./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro` resolve from the repo root during `codex-cage run`. If you run the same Compose file manually, pass `--project-directory <repo-root>` to match Codex Cage's behavior.
 
+## Execution Modes
+
+> Status: planned. Tracked in [#80](https://github.com/jhowliu/codex-cage/issues/80). Today Codex Cage always runs in Docker mode; direct mode is the design target for GitHub Actions.
+
+Codex Cage's isolation strategy depends on where it runs. The engine — bounded retry loop, independent review gate, secret guard, publish gate — is identical across modes; only the workspace isolation and service provisioning differ.
+
+- **Docker mode (default; local and self-hosted runners).** Codex Cage owns isolation: per-run volume clone, optional runtime image build, and Compose services started by the host-side orchestrator (see [Docker Compose Services](#docker-compose-services)). This is required wherever the host is not itself disposable — a laptop has no ephemeral VM, so the Docker sandbox is what keeps the agent off the host filesystem and credentials.
+- **Direct mode (GitHub Actions).** The runner's ephemeral VM already provides disposable isolation, so the inner Docker sandbox is skipped: Codex Cage clones on the runner and runs commands directly on the host through the same `ShellRunner` seam. Services come from GitHub Actions native `services:` containers, not Compose. Opt in via the execution-mode selector set by the workflow.
+
+Which `.codex-cage.yml` keys apply per mode:
+
+| Key | Docker mode | Direct mode |
+| --- | --- | --- |
+| `setup`, `verify` | yes | yes |
+| `agent`, `timeouts`, `pr`, `git`, `issue`, `guards` | yes | yes |
+| `services.compose`, `services.ready` | yes | ignored — declare services in the workflow `services:` block |
+| `runtime.image` | yes | use as the job `container:` image |
+| `runtime.dockerfile` (per-run build) | yes | not supported |
+
+In direct mode, running the Actions job inside the Codex Cage base image (`container:`) keeps the existing service DNS-name convention (`postgres`, `redis`) working, with service readiness expressed via service-container `--health-cmd`.
+
 ## Prompt Instructions
 
 Codex Cage relies on Codex CLI's native `AGENTS.md` handling for repository implementation guidance. It does not inject the contents of `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, or `CLAUDE.md` into implementation or review prompts.

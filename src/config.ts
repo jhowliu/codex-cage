@@ -57,10 +57,43 @@ export const codexCageConfigSchema = z
         max_secret_fix_attempts: z.number().int().nonnegative().default(2),
       })
       .default(() => ({ max_secret_fix_attempts: 2 })),
+    execution: z.enum(["docker", "direct"]).optional(),
   })
   .passthrough();
 
 export type CodexCageConfig = z.infer<typeof codexCageConfigSchema>;
+
+export type ExecutionMode = "docker" | "direct";
+
+export const CODEX_CAGE_EXECUTION_ENV = "CODEX_CAGE_EXECUTION";
+
+const executionModes = new Set<ExecutionMode>(["docker", "direct"]);
+
+function isExecutionMode(value: string): value is ExecutionMode {
+  return executionModes.has(value as ExecutionMode);
+}
+
+/**
+ * Resolves the execution mode from the environment first, then config, then
+ * defaults to `docker`. An explicitly set but invalid env value is rejected so
+ * a typo in CI fails loudly instead of silently falling back.
+ */
+export function resolveExecutionMode(input: {
+  env?: Record<string, string | undefined> | undefined;
+  config?: { execution?: ExecutionMode | undefined } | undefined;
+}): ExecutionMode {
+  const fromEnv = input.env?.[CODEX_CAGE_EXECUTION_ENV];
+  if (fromEnv !== undefined && fromEnv !== "") {
+    if (!isExecutionMode(fromEnv)) {
+      throw new Error(
+        `${CODEX_CAGE_EXECUTION_ENV} must be "docker" or "direct", got "${fromEnv}".`,
+      );
+    }
+    return fromEnv;
+  }
+
+  return input.config?.execution ?? "docker";
+}
 
 export type ConfigParseResult = {
   config: CodexCageConfig;
@@ -78,6 +111,7 @@ const knownTopLevelKeys = new Set([
   "git",
   "issue",
   "guards",
+  "execution",
 ]);
 
 export function parseCodexCageConfig(input: unknown): ConfigParseResult {

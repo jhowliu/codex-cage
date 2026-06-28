@@ -48,6 +48,35 @@ export function createDockerShellRunner(
   };
 }
 
+export function createHostShellRunner(
+  workspacePath: string,
+  env: Record<string, string> = {},
+): ShellRunner {
+  return {
+    async run(
+      command: string,
+      options: DockerCommandOptions = {},
+    ): Promise<CommandResult> {
+      const commandEnv = { ...env, ...(options.env ?? {}) };
+      const result = await execa(
+        hostCommandWithCodexAuth(command, options.codexAuthFilePath),
+        {
+          shell: true,
+          cwd: workspacePath,
+          env: commandEnv,
+          reject: false,
+        },
+      );
+
+      return {
+        exitCode: result.exitCode ?? 0,
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
+    },
+  };
+}
+
 export async function requiredShell(
   shell: ShellRunner,
   command: string,
@@ -154,6 +183,24 @@ export function formatCommandLog(command: string, result: CommandResult): string
 
 export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function hostCommandWithCodexAuth(
+  command: string,
+  codexAuthFilePath: string | undefined,
+): string {
+  if (codexAuthFilePath === undefined) {
+    return command;
+  }
+
+  const quoted = shellQuote(codexAuthFilePath);
+  return [
+    `if [ -f ${quoted} ] && [ -z "\${OPENAI_API_KEY:-}" ]; then mkdir -p "\${CODEX_HOME:-$HOME/.codex}"`,
+    `cp ${quoted} "\${CODEX_HOME:-$HOME/.codex}/auth.json"`,
+    `chmod 600 "\${CODEX_HOME:-$HOME/.codex}/auth.json"`,
+    "fi",
+    command,
+  ].join("; ");
 }
 
 function createShellCommandRunner(
