@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createHostShellRunner } from "../src/sandbox-execution.js";
+import { createHostShellRunner, createHostWorkspace } from "../src/sandbox-execution.js";
 
 async function withWorkspace(
   fn: (workspacePath: string) => Promise<void>,
@@ -59,4 +59,39 @@ test("host shell runner supports shell operators like the docker runner", async 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "ok");
   });
+});
+
+test("host shell runner configures git askpass when a GitHub token is present", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const runner = createHostShellRunner(workspacePath, {
+      GITHUB_TOKEN: "secret-token",
+    });
+
+    const result = await runner.run('"$GIT_ASKPASS" Username; "$GIT_ASKPASS" Password');
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "x-access-token\nsecret-token");
+  });
+});
+
+test("host shell runner leaves git askpass unset without a GitHub token", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const runner = createHostShellRunner(workspacePath);
+
+    const result = await runner.run('printf "%s" "${GIT_ASKPASS:-unset}"');
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "unset");
+  });
+});
+
+test("createHostWorkspace makes an empty directory and cleans it up", async () => {
+  const workspace = await createHostWorkspace("run-host-workspace");
+
+  const stats = await stat(workspace.workspacePath);
+  assert.equal(stats.isDirectory(), true);
+  assert.deepEqual(await readdir(workspace.workspacePath), []);
+
+  await workspace.cleanup();
+  await assert.rejects(() => stat(workspace.workspacePath), { code: "ENOENT" });
 });

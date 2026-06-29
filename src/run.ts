@@ -4,7 +4,11 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
 import type { createComposeProject } from "./compose.js";
-import { parseCodexCageConfig, type CodexCageConfig } from "./config.js";
+import {
+  parseCodexCageConfig,
+  resolveExecutionMode,
+  type CodexCageConfig,
+} from "./config.js";
 import { prepareRunCredentials } from "./credentials.js";
 import {
   type buildRuntimeImage,
@@ -19,6 +23,7 @@ import { createAuthenticatedRepo, resolveTargetRepo } from "./repo.js";
 import type { runIndependentReview } from "./review.js";
 import { RunFailureError } from "./run/errors.js";
 import { openRunStore } from "./state.js";
+import type { createHostShellRunner, createHostWorkspace } from "./sandbox-execution.js";
 import {
   runWorkflow,
   type RunCodexCageResult,
@@ -50,6 +55,8 @@ export type RunCodexCageDependencies = {
     sandbox: DockerSandbox,
     env: Record<string, string>,
   ) => ShellRunner;
+  createHostWorkspace?: typeof createHostWorkspace;
+  createHostShellRunner?: typeof createHostShellRunner;
   createComposeProject?: typeof createComposeProject;
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
@@ -82,6 +89,12 @@ export async function runCodexCage(
       ...(dependencies.createShellRunner === undefined
         ? {}
         : { createShellRunner: dependencies.createShellRunner }),
+      ...(dependencies.createHostWorkspace === undefined
+        ? {}
+        : { createHostWorkspace: dependencies.createHostWorkspace }),
+      ...(dependencies.createHostShellRunner === undefined
+        ? {}
+        : { createHostShellRunner: dependencies.createHostShellRunner }),
       ...(dependencies.createComposeProject === undefined
         ? {}
         : { createComposeProject: dependencies.createComposeProject }),
@@ -147,6 +160,10 @@ async function prepareRuntimeContext(
     source: "configured" as const,
   };
   const promptContext = await buildPromptContext(cwd);
+  const executionMode = resolveExecutionMode({
+    env: process.env,
+    config: configResult.config,
+  });
 
   return {
     cwd,
@@ -163,6 +180,7 @@ async function prepareRuntimeContext(
     branchName,
     runtimeImage,
     promptContext,
+    executionMode,
   };
 }
 

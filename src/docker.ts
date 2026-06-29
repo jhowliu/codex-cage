@@ -412,7 +412,7 @@ function commandWithCodexAuth(
   ].join("; ");
 }
 
-function commandWithGitHubAuth(
+export function commandWithGitHubAuth(
   command: string,
   env: Record<string, string>,
 ): string {
@@ -432,7 +432,7 @@ function commandWithGitHubAuth(
     "EOF",
     'chmod 700 "$tmp_git_askpass"',
     'export GIT_ASKPASS="$tmp_git_askpass" GIT_TERMINAL_PROMPT=0',
-    'trap \'rm -f "$tmp_git_askpass"\' EXIT',
+    "trap 'rm -f \"$tmp_git_askpass\"' EXIT",
     command,
   ].join("\n");
 }

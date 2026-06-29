@@ -405,6 +405,119 @@ verify:
   }
 });
 
+test("runCodexCage runs direct mode on the host without Docker resources", async () => {
+  const cwd = await createProject(`
+execution: direct
+setup:
+  - npm install
+verify:
+  - npm test
+services:
+  compose: .codex-cage/docker-compose.yml
+  ready:
+    - pg_isready
+`);
+  const shell = shellRunner(
+    new Map([
+      ["git clone", commandResult()],
+      ["git fetch origin", commandResult()],
+      ["npm install", commandResult("setup passed")],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      [
+        "git add --intent-to-add",
+        commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+      ],
+    ]),
+  );
+
+  let workspaceRunId = "";
+  let hostShellWorkspacePath = "";
+  let cleanupCalls = 0;
+
+  try {
+    const result = await runCodexCage(
+      {
+        cwd,
+        issueUrl: issue.url,
+      },
+      {
+        generateRunId: () => "run-direct-1",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => {
+          throw new Error("Docker sandbox must not be created in direct mode.");
+        },
+        createComposeProject: () => {
+          throw new Error("Compose must not be started in direct mode.");
+        },
+        createHostWorkspace: async (runId: string) => {
+          workspaceRunId = runId;
+          return {
+            workspacePath: "/tmp/codex-cage-direct",
+            cleanup: async () => {
+              cleanupCalls += 1;
+            },
+          };
+        },
+        createHostShellRunner: (workspacePath: string) => {
+          hostShellWorkspacePath = workspacePath;
+          return shell;
+        },
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async (input) => ({
+          branchName: input.branchName ?? "codex-cage/gh-26-run-direct",
+          commitMessage: "#26 Wire run command",
+          prTitle: "#26 Wire run command",
+          prBody: "body",
+          prUrl: "https://github.com/jhowliu/codex-cage/pull/99",
+        }),
+      },
+    );
+
+    assert.deepEqual(result, {
+      runId: "run-direct-1",
+      status: "succeeded",
+      failureCode: null,
+      prUrl: "https://github.com/jhowliu/codex-cage/pull/99",
+    });
+    assert.equal(workspaceRunId, "run-direct-1");
+    assert.equal(hostShellWorkspacePath, "/tmp/codex-cage-direct");
+    assert.equal(cleanupCalls, 1);
+    assert.ok(
+      shell.commands.some(
+        (command) =>
+          command.includes("git clone") &&
+          command.includes("https://github.com/jhowliu/codex-cage.git"),
+      ),
+      "direct mode should clone via the host shell",
+    );
+
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails("run-direct-1");
+    store.close();
+
+    assert.equal(details.run.status, "succeeded");
+    assert.deepEqual(
+      details.phases.map((phase) => phase.name),
+      ["preflight", "cloning", "setup", "implement", "verify", "review", "pr"],
+    );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runCodexCage redacts credential-bearing publish failures in artifacts", async () => {
   const cwd = await createProject(`
 verify:

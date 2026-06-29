@@ -4,11 +4,12 @@ import {
   hasComposeServices,
   type ComposeProject,
 } from "./compose.js";
-import type { CodexCageConfig } from "./config.js";
+import type { CodexCageConfig, ExecutionMode } from "./config.js";
 import type { CommandCredentialIntent, RunCredentials } from "./credentials.js";
 import {
   buildRuntimeImage,
   createDockerSandbox,
+  unauthenticatedRemoteUrl,
   type DockerCommandOptions,
   type DockerSandbox,
   type DockerSandboxOptions,
@@ -31,10 +32,13 @@ import { buildImplementationPrompt } from "./run/prompts.js";
 import {
   codexExecCommand,
   createDockerShellRunner,
+  createHostShellRunner,
+  createHostWorkspace,
   formatCommandLog,
   readCurrentDiff,
   requiredShell,
   shellQuote,
+  type HostWorkspace,
   type ShellRunner,
 } from "./sandbox-execution.js";
 import type { FailureCode, PhaseName, RunStore } from "./state.js";
@@ -93,6 +97,7 @@ export type RuntimeContext = {
   branchName: string;
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
   promptContext: PromptContext;
+  executionMode: ExecutionMode;
 };
 
 export type RunWorkflowInput = {
@@ -104,6 +109,8 @@ export type RunWorkflowInput = {
     sandbox: DockerSandbox,
     env: Record<string, string>,
   ) => ShellRunner;
+  createHostWorkspace?: typeof createHostWorkspace;
+  createHostShellRunner?: typeof createHostShellRunner;
   createComposeProject?: typeof createComposeProject;
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
@@ -115,6 +122,8 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
   const createSandbox = input.createDockerSandbox ?? createDockerSandbox;
   const buildImage = input.buildRuntimeImage ?? buildRuntimeImage;
   const makeShellRunner = input.createShellRunner ?? createDockerShellRunner;
+  const makeHostWorkspace = input.createHostWorkspace ?? createHostWorkspace;
+  const makeHostShellRunner = input.createHostShellRunner ?? createHostShellRunner;
   const makeComposeProject = input.createComposeProject ?? createComposeProject;
   const review = input.runIndependentReview ?? runIndependentReview;
   const publish = input.publishSuccessfulRun ?? publishSuccessfulRun;
@@ -124,6 +133,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
   let sandbox: DockerSandbox | null = null;
   let shell: ShellRunner | null = null;
   let compose: ComposeProject | null = null;
+  let hostWorkspace: HostWorkspace | null = null;
 
   try {
     await journal.startRun();
@@ -145,86 +155,37 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
       ].join("\n");
     });
 
-    const runtimeDockerfile = context.config.runtime.dockerfile;
-
-    if (runtimeDockerfile !== null) {
-      try {
-        context.runtimeImage = await journal.runPhase("runtime_image", async () => {
-          const result = await buildImage({
-            runId: context.runId,
-            dockerfilePath: resolve(context.cwd, runtimeDockerfile),
-            contextPath: resolve(context.cwd, ".codex-cage"),
-          });
-
-          return {
-            log: [
-              `Built runtime image: ${result.image}`,
-              `Dockerfile: ${result.dockerfilePath}`,
-              `Build context: ${result.contextPath}`,
-            ].join("\n"),
-            value: { ...result, source: "built" as const },
-          };
-        });
-      } catch (error) {
-        throw new RunFailureError("runtime_image_failed", formatError(error));
-      }
-    }
-
-    await journal.writeJsonArtifact("runtime-image.json", context.runtimeImage);
-
-    if (hasComposeServices(context.config.services)) {
-      const composeFile = context.config.services.compose;
-
-      if (composeFile === null) {
-        throw new RunFailureError("invalid_config", "Compose file is not configured.");
-      }
-
-      compose = makeComposeProject({
-        runId: context.runId,
-        composeFile: resolve(context.cwd, composeFile),
-        projectDirectory: context.cwd,
-        readyCommands: context.config.services.ready,
-      });
-      try {
-        await journal.runPhase("setup", async () => {
-          await compose?.up();
-          await compose?.waitUntilReady();
-          return "Compose services are ready.";
-        });
-      } catch (error) {
-        throw new RunFailureError("setup_failed", formatError(error));
-      }
-    }
-
-    const cloneCredentials = runtimeCommandCredentials("clone", context);
-    const sandboxOptions: DockerSandboxOptions = {
-      runId: context.runId,
-      cloneUrl: context.authenticatedRepo.cloneUrl,
-      image: context.runtimeImage.image,
-      env: cloneCredentials.env ?? {},
-    };
-
-    if (compose !== null) {
-      sandboxOptions.serviceNetworkName = compose.networkName;
-    }
-
-    sandbox = createSandbox(sandboxOptions);
-    shell = makeShellRunner(sandbox, {});
-    const shellRunner = shell;
-
-    await journal.setRunStatus("cloning");
-    await journal.runPhase("cloning", async () => {
-      await sandbox?.create();
-      await sandbox?.cloneRepository();
-      return await requiredShell(
-        shellRunner,
-        `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
-          context.baseBranch,
-        )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+    if (context.executionMode === "direct") {
+      shell = await provisionDirectWorkspace({
+        context,
+        journal,
         redactor,
-        runtimeCommandCredentials("clone", context),
-      );
-    });
+        createHostWorkspace: makeHostWorkspace,
+        createHostShellRunner: makeHostShellRunner,
+        registerWorkspace: (workspace) => {
+          hostWorkspace = workspace;
+        },
+      });
+    } else {
+      const provisioned = await provisionDockerSandbox({
+        context,
+        journal,
+        redactor,
+        createSandbox,
+        buildImage,
+        makeShellRunner,
+        makeComposeProject,
+        registerCompose: (project) => {
+          compose = project;
+        },
+        registerSandbox: (created) => {
+          sandbox = created;
+        },
+      });
+      shell = provisioned;
+    }
+
+    const shellRunner = shell;
 
     if (context.config.setup.length > 0) {
       await journal.setRunStatus("setup");
@@ -283,8 +244,148 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
 
     return runResult;
   } finally {
-    await cleanupRuntime(compose, sandbox);
+    await cleanupRuntime(compose, sandbox, hostWorkspace);
   }
+}
+
+async function provisionDockerSandbox(input: {
+  context: RuntimeContext;
+  journal: RunJournal;
+  redactor: (value: string) => string;
+  createSandbox: (options: DockerSandboxOptions) => DockerSandbox;
+  buildImage: typeof buildRuntimeImage;
+  makeShellRunner: (sandbox: DockerSandbox, env: Record<string, string>) => ShellRunner;
+  makeComposeProject: typeof createComposeProject;
+  registerCompose: (project: ComposeProject) => void;
+  registerSandbox: (sandbox: DockerSandbox) => void;
+}): Promise<ShellRunner> {
+  const { context, journal, redactor } = input;
+  const runtimeDockerfile = context.config.runtime.dockerfile;
+
+  if (runtimeDockerfile !== null) {
+    try {
+      context.runtimeImage = await journal.runPhase("runtime_image", async () => {
+        const result = await input.buildImage({
+          runId: context.runId,
+          dockerfilePath: resolve(context.cwd, runtimeDockerfile),
+          contextPath: resolve(context.cwd, ".codex-cage"),
+        });
+
+        return {
+          log: [
+            `Built runtime image: ${result.image}`,
+            `Dockerfile: ${result.dockerfilePath}`,
+            `Build context: ${result.contextPath}`,
+          ].join("\n"),
+          value: { ...result, source: "built" as const },
+        };
+      });
+    } catch (error) {
+      throw new RunFailureError("runtime_image_failed", formatError(error));
+    }
+  }
+
+  await journal.writeJsonArtifact("runtime-image.json", context.runtimeImage);
+
+  let compose: ComposeProject | null = null;
+
+  if (hasComposeServices(context.config.services)) {
+    const composeFile = context.config.services.compose;
+
+    if (composeFile === null) {
+      throw new RunFailureError("invalid_config", "Compose file is not configured.");
+    }
+
+    compose = input.makeComposeProject({
+      runId: context.runId,
+      composeFile: resolve(context.cwd, composeFile),
+      projectDirectory: context.cwd,
+      readyCommands: context.config.services.ready,
+    });
+    input.registerCompose(compose);
+    try {
+      await journal.runPhase("setup", async () => {
+        await compose?.up();
+        await compose?.waitUntilReady();
+        return "Compose services are ready.";
+      });
+    } catch (error) {
+      throw new RunFailureError("setup_failed", formatError(error));
+    }
+  }
+
+  const cloneCredentials = runtimeCommandCredentials("clone", context);
+  const sandboxOptions: DockerSandboxOptions = {
+    runId: context.runId,
+    cloneUrl: context.authenticatedRepo.cloneUrl,
+    image: context.runtimeImage.image,
+    env: cloneCredentials.env ?? {},
+  };
+
+  if (compose !== null) {
+    sandboxOptions.serviceNetworkName = compose.networkName;
+  }
+
+  const sandbox = input.createSandbox(sandboxOptions);
+  input.registerSandbox(sandbox);
+  const shell = input.makeShellRunner(sandbox, {});
+
+  await journal.setRunStatus("cloning");
+  await journal.runPhase("cloning", async () => {
+    await sandbox.create();
+    await sandbox.cloneRepository();
+    return await requiredShell(
+      shell,
+      `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
+        context.baseBranch,
+      )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+      redactor,
+      cloneCredentials,
+    );
+  });
+
+  return shell;
+}
+
+async function provisionDirectWorkspace(input: {
+  context: RuntimeContext;
+  journal: RunJournal;
+  redactor: (value: string) => string;
+  createHostWorkspace: typeof createHostWorkspace;
+  createHostShellRunner: typeof createHostShellRunner;
+  registerWorkspace: (workspace: HostWorkspace) => void;
+}): Promise<ShellRunner> {
+  const { context, journal, redactor } = input;
+
+  await journal.writeJsonArtifact("runtime-image.json", context.runtimeImage);
+
+  const cloneCredentials = runtimeCommandCredentials("clone", context);
+  const workspace = await input.createHostWorkspace(context.runId);
+  input.registerWorkspace(workspace);
+  const shell = input.createHostShellRunner(workspace.workspacePath, {});
+
+  await journal.setRunStatus("cloning");
+  await journal.runPhase("cloning", async () => {
+    const remoteUrl = unauthenticatedRemoteUrl(context.authenticatedRepo.cloneUrl);
+    await requiredShell(
+      shell,
+      `git clone ${shellQuote(remoteUrl)} . && git remote set-url origin ${shellQuote(
+        remoteUrl,
+      )}`,
+      redactor,
+      cloneCredentials,
+    );
+    return await requiredShell(
+      shell,
+      `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
+        context.baseBranch,
+      )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+      redactor,
+      cloneCredentials,
+    );
+  });
+
+  return shell;
 }
 
 function runtimeCommandCredentials(
@@ -468,6 +569,7 @@ function failureCodeFromError(error: unknown): FailureCode {
 async function cleanupRuntime(
   compose: ComposeProject | null,
   sandbox: DockerSandbox | null,
+  hostWorkspace: HostWorkspace | null,
 ): Promise<void> {
   const errors: string[] = [];
 
@@ -482,6 +584,14 @@ async function cleanupRuntime(
   if (sandbox !== null) {
     try {
       await sandbox.cleanup();
+    } catch (error) {
+      errors.push(formatError(error));
+    }
+  }
+
+  if (hostWorkspace !== null) {
+    try {
+      await hostWorkspace.cleanup();
     } catch (error) {
       errors.push(formatError(error));
     }
