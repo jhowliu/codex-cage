@@ -158,7 +158,9 @@ When a Compose file lives under `.codex-cage/`, Codex Cage still runs Compose wi
 
 ## Execution Modes
 
-> Status: planned. Tracked in [#80](https://github.com/jhowliu/codex-cage/issues/80). Today Codex Cage always runs in Docker mode; direct mode is the design target for GitHub Actions.
+> Status: in progress. Tracked in [#80](https://github.com/jhowliu/codex-cage/issues/80). The engine supports both modes; the GitHub Actions workflow that selects direct mode is still pending.
+
+Select the mode with the `CODEX_CAGE_EXECUTION` environment variable (`docker` or `direct`) or the `execution` key in `.codex-cage.yml`. The environment variable wins; both default to `docker`.
 
 Codex Cage's isolation strategy depends on where it runs. The engine — bounded retry loop, independent review gate, secret guard, publish gate — is identical across modes; only the workspace isolation and service provisioning differ.
 
@@ -167,13 +169,13 @@ Codex Cage's isolation strategy depends on where it runs. The engine — bounded
 
 Which `.codex-cage.yml` keys apply per mode:
 
-| Key | Docker mode | Direct mode |
-| --- | --- | --- |
-| `setup`, `verify` | yes | yes |
-| `agent`, `timeouts`, `pr`, `git`, `issue`, `guards` | yes | yes |
-| `services.compose`, `services.ready` | yes | ignored — declare services in the workflow `services:` block |
-| `runtime.image` | yes | use as the job `container:` image |
-| `runtime.dockerfile` (per-run build) | yes | not supported |
+| Key                                                 | Docker mode | Direct mode                                                  |
+| --------------------------------------------------- | ----------- | ------------------------------------------------------------ |
+| `setup`, `verify`                                   | yes         | yes                                                          |
+| `agent`, `timeouts`, `pr`, `git`, `issue`, `guards` | yes         | yes                                                          |
+| `services.compose`, `services.ready`                | yes         | ignored — declare services in the workflow `services:` block |
+| `runtime.image`                                     | yes         | use as the job `container:` image                            |
+| `runtime.dockerfile` (per-run build)                | yes         | not supported                                                |
 
 In direct mode, running the Actions job inside the Codex Cage base image (`container:`) keeps the existing service DNS-name convention (`postgres`, `redis`) working, with service readiness expressed via service-container `--health-cmd`.
 

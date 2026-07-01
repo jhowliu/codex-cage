@@ -1,5 +1,9 @@
 import { execa } from "execa";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
+  commandWithGitHubAuth,
   dockerRunArgs,
   type DockerCommandOptions,
   type DockerSandbox,
@@ -10,6 +14,26 @@ import type { ReviewAgentRunner } from "./review.js";
 export type ShellRunner = {
   run(command: string, options?: DockerCommandOptions): Promise<CommandResult>;
 };
+
+export type HostWorkspace = {
+  workspacePath: string;
+  cleanup: () => Promise<void>;
+};
+
+/**
+ * Creates an empty host directory to clone the target repository into for
+ * direct-mode runs, where the runner (not Docker) provides isolation.
+ */
+export async function createHostWorkspace(runId: string): Promise<HostWorkspace> {
+  const workspacePath = await mkdtemp(join(tmpdir(), `codex-cage-${runId}-`));
+
+  return {
+    workspacePath,
+    async cleanup(): Promise<void> {
+      await rm(workspacePath, { recursive: true, force: true });
+    },
+  };
+}
 
 export function createDockerShellRunner(
   sandbox: DockerSandbox,
@@ -59,7 +83,10 @@ export function createHostShellRunner(
     ): Promise<CommandResult> {
       const commandEnv = { ...env, ...(options.env ?? {}) };
       const result = await execa(
-        hostCommandWithCodexAuth(command, options.codexAuthFilePath),
+        commandWithGitHubAuth(
+          hostCommandWithCodexAuth(command, options.codexAuthFilePath),
+          commandEnv,
+        ),
         {
           shell: true,
           cwd: workspacePath,
