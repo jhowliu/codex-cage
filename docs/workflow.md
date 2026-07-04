@@ -179,6 +179,24 @@ Which `.codex-cage.yml` keys apply per mode:
 
 In direct mode, running the Actions job inside the Codex Cage base image (`container:`) keeps the existing service DNS-name convention (`postgres`, `redis`) working, with service readiness expressed via service-container `--health-cmd`.
 
+### CI Outcome Signal
+
+For automation, `codex-cage run` emits a deterministic outcome so a workflow can branch on success or failure:
+
+- **Exit code.** The process exits non-zero when the run fails and zero when it succeeds.
+- **Result file.** Pass `--result-json <path>` (or set `CODEX_CAGE_RESULT_FILE`; the flag wins) to write the run result as JSON on both success and failure:
+
+  ```json
+  {
+    "runId": "run-20260704-abcdef",
+    "status": "succeeded",
+    "failureCode": null,
+    "prUrl": "https://github.com/OWNER/REPO/pull/123"
+  }
+  ```
+
+  `status` is `succeeded` or `failed`; `failureCode` is `null` on success and a failure code (for example `verify_failed`, `review_blocking`) otherwise; `prUrl` is `null` unless a PR was opened.
+
 ## Prompt Instructions
 
 Codex Cage relies on Codex CLI's native `AGENTS.md` handling for repository implementation guidance. It does not inject the contents of `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, or `CLAUDE.md` into implementation or review prompts.
