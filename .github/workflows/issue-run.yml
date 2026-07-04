@@ -29,7 +29,6 @@ jobs:
       GH_TOKEN: ${{ secrets.CODEX_CAGE_GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       ISSUE_URL: ${{ github.event.issue.html_url }}
-      RESULT_FILE: ${{ runner.temp }}/result.json
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Mark issue in progress
@@ -62,12 +61,12 @@ jobs:
           } > .codex-cage.env
 
       - name: Run Codex Cage
-        run: node dist/src/cli.js run "$ISSUE_URL" --result-json "$RESULT_FILE"
+        run: node dist/src/cli.js run "$ISSUE_URL" --result-json "$RUNNER_TEMP/result.json"
 
       - name: Report failure
         if: failure()
         run: |
-          FAILURE_CODE=$(jq -r '.failureCode // "unknown"' "$RESULT_FILE" 2>/dev/null || echo unknown)
+          FAILURE_CODE=$(jq -r '.failureCode // "unknown"' "$RUNNER_TEMP/result.json" 2>/dev/null || echo unknown)
           BODY="Codex Cage run failed (\`${FAILURE_CODE}\`). [View workflow run](${RUN_URL})."
           SUMMARY_FILE=$(ls .codex-cage/runs/*/summary.md 2>/dev/null | head -n1 || true)
           if [ -n "$SUMMARY_FILE" ]; then
