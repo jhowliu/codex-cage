@@ -1,0 +1,8 @@
+setup:
+  - npm ci
+
+verify:
+  - npm test
+
+git:
+  base: main

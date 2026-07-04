@@ -158,7 +158,7 @@ When a Compose file lives under `.codex-cage/`, Codex Cage still runs Compose wi
 
 ## Execution Modes
 
-> Status: in progress. Tracked in [#80](https://github.com/jhowliu/codex-cage/issues/80). The engine supports both modes; the GitHub Actions workflow that selects direct mode is still pending.
+> Status: in progress. Tracked in [#80](https://github.com/jhowliu/codex-cage/issues/80). The engine supports both modes, and the label-triggered GitHub Actions workflow (see [GitHub Actions Automation](#github-actions-automation)) runs direct mode. A PR-revise loop is still pending.
 
 Select the mode with the `CODEX_CAGE_EXECUTION` environment variable (`docker` or `direct`) or the `execution` key in `.codex-cage.yml`. The environment variable wins; both default to `docker`.
 
@@ -196,6 +196,44 @@ For automation, `codex-cage run` emits a deterministic outcome so a workflow can
   ```
 
   `status` is `succeeded` or `failed`; `failureCode` is `null` on success and a failure code (for example `verify_failed`, `review_blocking`) otherwise; `prUrl` is `null` unless a PR was opened.
+
+## GitHub Actions Automation
+
+`.github/workflows/issue-run.yml` turns an issue label into a direct-mode run. Adding the `codex-cage:run` label to an issue builds Codex Cage, runs it against that issue on the runner, and opens a PR on success.
+
+**Label state machine.** The workflow drives three labels:
+
+- `codex-cage:run` — the trigger. Removed as soon as the run starts.
+- `codex-cage:in-progress` — added at start, removed at the end (success or failure).
+- `codex-cage:blocked` — added on failure, together with a comment that carries the failure code, a link to the workflow run, and the run summary when present.
+
+Create all three labels once before using the workflow. The full run artifact directory is uploaded to each workflow run for debugging.
+
+**Secrets.** Configure two repository secrets:
+
+- `OPENAI_API_KEY` — Codex auth for direct-mode runs.
+- `CODEX_CAGE_GITHUB_TOKEN` — a fine-grained PAT or GitHub App installation token used for clone, push, PR creation, and label/comment updates.
+
+Use `CODEX_CAGE_GITHUB_TOKEN` rather than the built-in `GITHUB_TOKEN`: events produced by the default token (opening a PR, adding a label) do not trigger further workflows, so any downstream automation (for example a future review workflow) would never fire. A PAT or App token is also required for the run to push branches and open PRs. The same token permissions as a local run apply (see [GitHub Token Permissions](#github-token-permissions)), plus **Issues: Read and write** for the label state machine.
+
+**Services (db, redis, …).** The default workflow runs directly on `ubuntu-latest` and installs the Codex CLI, which is enough for repos whose `verify` needs no external services. For a repo that needs services, run the job inside the Codex Cage base image and declare service containers so they resolve by DNS name:
+
+```yaml
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    container: ghcr.io/jhowliu/codex-cage/base:0.1.1
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-retries 10
+```
+
+Inside a job container, service containers share a network and are reachable by service name (`postgres`, `redis`), matching the Compose DNS-name convention used in Docker mode. Service definitions live in the workflow, not in `.codex-cage.yml` (`services.compose` is ignored in direct mode).
 
 ## Prompt Instructions
 
