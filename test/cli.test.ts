@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,35 @@ import { fileURLToPath } from "node:url";
 import { createCli } from "../src/commands.js";
 import type { RunCommandOptions, RunCodexCageResult } from "../src/run.js";
 import { openRunStore } from "../src/state.js";
+
+async function runCliInProcess(
+  args: string[],
+  result: RunCodexCageResult,
+): Promise<{ exitCode: number | string | undefined; calls: RunCommandOptions[] }> {
+  const calls: RunCommandOptions[] = [];
+  const originalConsoleLog = console.log;
+  const originalExitCode = process.exitCode;
+  process.exitCode = 0;
+
+  const program = createCli({
+    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+      calls.push(input);
+      return result;
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = () => undefined;
+
+  try {
+    await program.parseAsync(args, { from: "user" });
+    return { exitCode: process.exitCode, calls };
+  } finally {
+    console.log = originalConsoleLog;
+    process.exitCode = originalExitCode;
+  }
+}
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const cliPath = join(testDir, "..", "src", "cli.js");
@@ -57,6 +86,7 @@ test("command help is available for commands", () => {
 test("run accepts a positional issue URL", async () => {
   const calls: RunCommandOptions[] = [];
   const originalConsoleLog = console.log;
+  const originalExitCode = process.exitCode;
   const program = createCli({
     runCodexCage: async (input): Promise<RunCodexCageResult> => {
       calls.push(input);
@@ -85,6 +115,7 @@ test("run accepts a positional issue URL", async () => {
     );
   } finally {
     console.log = originalConsoleLog;
+    process.exitCode = originalExitCode;
   }
 
   assert.deepEqual(calls, [
@@ -98,6 +129,7 @@ test("run accepts a positional issue URL", async () => {
 test("run keeps the --issue option for compatibility", async () => {
   const calls: RunCommandOptions[] = [];
   const originalConsoleLog = console.log;
+  const originalExitCode = process.exitCode;
   const program = createCli({
     runCodexCage: async (input): Promise<RunCodexCageResult> => {
       calls.push(input);
@@ -121,6 +153,7 @@ test("run keeps the --issue option for compatibility", async () => {
     );
   } finally {
     console.log = originalConsoleLog;
+    process.exitCode = originalExitCode;
   }
 
   assert.deepEqual(calls, [
@@ -128,6 +161,92 @@ test("run keeps the --issue option for compatibility", async () => {
       issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
     },
   ]);
+});
+
+test("run writes the result file and exits zero on success", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const resultPath = join(cwd, "result.json");
+
+  try {
+    const successResult: RunCodexCageResult = {
+      runId: "run-ok",
+      status: "succeeded",
+      failureCode: null,
+      prUrl: "https://github.com/jhowliu/codex-cage/pull/7",
+    };
+    const { exitCode } = await runCliInProcess(
+      [
+        "run",
+        "https://github.com/jhowliu/codex-cage/issues/7",
+        "--result-json",
+        resultPath,
+      ],
+      successResult,
+    );
+
+    assert.equal(exitCode, 0);
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), successResult);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run writes the result file and exits non-zero on failure", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const resultPath = join(cwd, "result.json");
+
+  try {
+    const failureResult: RunCodexCageResult = {
+      runId: "run-fail",
+      status: "failed",
+      failureCode: "verify_failed",
+      prUrl: null,
+    };
+    const { exitCode } = await runCliInProcess(
+      [
+        "run",
+        "https://github.com/jhowliu/codex-cage/issues/8",
+        "--result-json",
+        resultPath,
+      ],
+      failureResult,
+    );
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), failureResult);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run reads the result file path from the environment", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const resultPath = join(cwd, "env-result.json");
+  const previous = process.env.CODEX_CAGE_RESULT_FILE;
+  process.env.CODEX_CAGE_RESULT_FILE = resultPath;
+
+  try {
+    const failureResult: RunCodexCageResult = {
+      runId: "run-env",
+      status: "failed",
+      failureCode: "review_blocking",
+      prUrl: null,
+    };
+    const { exitCode } = await runCliInProcess(
+      ["run", "https://github.com/jhowliu/codex-cage/issues/9"],
+      failureResult,
+    );
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), failureResult);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CODEX_CAGE_RESULT_FILE;
+    } else {
+      process.env.CODEX_CAGE_RESULT_FILE = previous;
+    }
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("runs list and show read local run metadata", async () => {

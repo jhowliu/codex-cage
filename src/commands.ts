@@ -1,9 +1,13 @@
 import { Command } from "commander";
+import { writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { initProject } from "./init.js";
-import { runCodexCage, type RunProgressEvent } from "./run.js";
+import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
 import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
+
+export const RESULT_FILE_ENV = "CODEX_CAGE_RESULT_FILE";
 
 export type CliDependencies = {
   runCodexCage?: typeof runCodexCage;
@@ -46,6 +50,10 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
+    .option(
+      "--result-json <path>",
+      `write the machine-readable run result to <path> (also settable via ${RESULT_FILE_ENV})`,
+    )
     .action(
       async (
         issueArgument: string | undefined,
@@ -55,6 +63,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           base?: string;
           model?: string;
           draft?: boolean;
+          resultJson?: string;
         },
         command: Command,
       ) => {
@@ -94,6 +103,15 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
         if (result.prUrl !== null) {
           console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
+        }
+
+        const resultPath = options.resultJson ?? process.env[RESULT_FILE_ENV];
+        if (resultPath !== undefined && resultPath !== "") {
+          await writeRunResultFile(resultPath, result);
+        }
+
+        if (result.status === "failed") {
+          process.exitCode = 1;
         }
       },
     );
@@ -236,6 +254,20 @@ function removeUndefinedProperties<TValue extends Record<string, unknown>>(
   return Object.fromEntries(
     Object.entries(value).filter(([, entry]) => entry !== undefined),
   ) as TValue;
+}
+
+async function writeRunResultFile(
+  path: string,
+  result: RunCodexCageResult,
+): Promise<void> {
+  const payload: RunCodexCageResult = {
+    runId: result.runId,
+    status: result.status,
+    failureCode: result.failureCode,
+    prUrl: result.prUrl,
+  };
+
+  await writeFile(resolve(path), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 }
 
 function formatCleanupReport(
