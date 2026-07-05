@@ -61,7 +61,7 @@ jobs:
           } > .codex-cage.env
 
       - name: Run Codex Cage
-        run: node dist/src/cli.js run "$ISSUE_URL" --result-json "$RUNNER_TEMP/result.json"
+        run: node dist/src/cli.js run "$ISSUE_URL" --verbose --result-json "$RUNNER_TEMP/result.json"
 
       - name: Report failure
         if: failure()

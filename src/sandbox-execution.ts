@@ -2,6 +2,7 @@ import { execa } from "execa";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import {
   commandWithGitHubAuth,
   dockerRunArgs,
@@ -14,6 +15,61 @@ import type { ReviewAgentRunner } from "./review.js";
 export type ShellRunner = {
   run(command: string, options?: DockerCommandOptions): Promise<CommandResult>;
 };
+
+// A line-buffered output sink. Chunks are accumulated and each complete line is
+// passed through `redact` before `write`, so secrets are removed even when the
+// output streams live. Callers flush after a command to emit a trailing
+// partial line.
+export type StreamSink = {
+  onData: (chunk: string) => void;
+  flush: () => void;
+};
+
+export function createLineStreamSink(
+  write: (line: string) => void,
+  redact: (input: string) => string = (input) => input,
+): StreamSink {
+  let buffer = "";
+  const emit = (line: string): void => write(redact(line));
+
+  return {
+    onData(chunk: string): void {
+      buffer += chunk;
+      let index = buffer.indexOf("\n");
+      while (index !== -1) {
+        emit(buffer.slice(0, index + 1));
+        buffer = buffer.slice(index + 1);
+        index = buffer.indexOf("\n");
+      }
+    },
+    flush(): void {
+      if (buffer.length > 0) {
+        emit(buffer.endsWith("\n") ? buffer : `${buffer}\n`);
+        buffer = "";
+      }
+    },
+  };
+}
+
+// Builds execa stdio options that both buffer output (for the returned result)
+// and tee live chunks to `onData`. Without a sink, execa keeps its defaults.
+function outputTeeOptions(
+  onData: ((chunk: string) => void) | undefined,
+): { stdout: ["pipe", Writable]; stderr: ["pipe", Writable] } | Record<string, never> {
+  if (onData === undefined) {
+    return {};
+  }
+
+  const sink = (): Writable =>
+    new Writable({
+      write(chunk, _encoding, callback): void {
+        onData(chunk.toString());
+        callback();
+      },
+    });
+
+  return { stdout: ["pipe", sink()], stderr: ["pipe", sink()] };
+}
 
 export type HostWorkspace = {
   workspacePath: string;
@@ -38,6 +94,7 @@ export async function createHostWorkspace(runId: string): Promise<HostWorkspace>
 export function createDockerShellRunner(
   sandbox: DockerSandbox,
   _env: Record<string, string>,
+  sink?: StreamSink,
 ): ShellRunner {
   return {
     async run(
@@ -45,6 +102,7 @@ export function createDockerShellRunner(
       options: DockerCommandOptions = {},
     ): Promise<CommandResult> {
       const commandEnv = options.env ?? {};
+      const onData = options.onData ?? sink?.onData;
       const result = await execa(
         "docker",
         dockerRunArgs({
@@ -60,8 +118,10 @@ export function createDockerShellRunner(
         {
           env: commandEnv,
           reject: false,
+          ...outputTeeOptions(onData),
         },
       );
+      sink?.flush();
 
       return {
         exitCode: result.exitCode ?? 0,
@@ -75,6 +135,7 @@ export function createDockerShellRunner(
 export function createHostShellRunner(
   workspacePath: string,
   env: Record<string, string> = {},
+  sink?: StreamSink,
 ): ShellRunner {
   return {
     async run(
@@ -82,6 +143,7 @@ export function createHostShellRunner(
       options: DockerCommandOptions = {},
     ): Promise<CommandResult> {
       const commandEnv = { ...env, ...(options.env ?? {}) };
+      const onData = options.onData ?? sink?.onData;
       const result = await execa(
         commandWithGitHubAuth(
           hostCommandWithCodexAuth(command, options.codexAuthFilePath),
@@ -97,8 +159,10 @@ export function createHostShellRunner(
           // container has no stdin attached).
           stdin: "ignore",
           reject: false,
+          ...outputTeeOptions(onData),
         },
       );
+      sink?.flush();
 
       return {
         exitCode: result.exitCode ?? 0,

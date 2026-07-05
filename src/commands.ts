@@ -8,6 +8,7 @@ import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
 export const RESULT_FILE_ENV = "CODEX_CAGE_RESULT_FILE";
+export const VERBOSE_ENV = "CODEX_CAGE_VERBOSE";
 
 export type CliDependencies = {
   runCodexCage?: typeof runCodexCage;
@@ -54,6 +55,10 @@ export function createCli(dependencies: CliDependencies = {}): Command {
       "--result-json <path>",
       `write the machine-readable run result to <path> (also settable via ${RESULT_FILE_ENV})`,
     )
+    .option(
+      "--verbose",
+      `stream redacted command output live to stdout (also settable via ${VERBOSE_ENV})`,
+    )
     .action(
       async (
         issueArgument: string | undefined,
@@ -64,6 +69,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           model?: string;
           draft?: boolean;
           resultJson?: string;
+          verbose?: boolean;
         },
         command: Command,
       ) => {
@@ -75,6 +81,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           command.error("error: missing required issue URL");
         }
 
+        const verbose = options.verbose === true || process.env[VERBOSE_ENV] === "1";
         const result = await run(
           removeUndefinedProperties({
             issueUrl,
@@ -82,6 +89,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
             base: options.base,
             model: options.model,
             draft: options.draft,
+            verbose: verbose ? true : undefined,
           }),
           {
             onProgress: (event) => {

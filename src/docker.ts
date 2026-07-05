@@ -31,6 +31,8 @@ export type DockerSandboxOptions = {
 export type DockerCommandOptions = {
   env?: Record<string, string>;
   codexAuthFilePath?: string | undefined;
+  // Live output sink: receives stdout/stderr chunks as the command runs.
+  onData?: ((chunk: string) => void) | undefined;
 };
 
 export type DockerSandbox = {

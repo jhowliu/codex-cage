@@ -34,12 +34,14 @@ import {
   createDockerShellRunner,
   createHostShellRunner,
   createHostWorkspace,
+  createLineStreamSink,
   formatCommandLog,
   readCurrentDiff,
   requiredShell,
   shellQuote,
   type HostWorkspace,
   type ShellRunner,
+  type StreamSink,
 } from "./sandbox-execution.js";
 import type { FailureCode, PhaseName, RunStore } from "./state.js";
 
@@ -98,6 +100,7 @@ export type RuntimeContext = {
   runtimeImage: RuntimeImageBuildResult & { source: "configured" | "built" };
   promptContext: PromptContext;
   executionMode: ExecutionMode;
+  verbose: boolean;
 };
 
 export type RunWorkflowInput = {
@@ -108,6 +111,7 @@ export type RunWorkflowInput = {
   createShellRunner?: (
     sandbox: DockerSandbox,
     env: Record<string, string>,
+    sink?: StreamSink,
   ) => ShellRunner;
   createHostWorkspace?: typeof createHostWorkspace;
   createHostShellRunner?: typeof createHostShellRunner;
@@ -130,6 +134,11 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
   const onProgress = input.onProgress ?? (() => undefined);
   const journal = new RunJournal(input.store, context, onProgress);
   const redactor = context.credentials.redactor();
+  // In verbose mode, stream redacted command output to stdout so progress is
+  // visible live (locally and, crucially, in CI logs where files are not).
+  const streamSink = context.verbose
+    ? createLineStreamSink((line) => process.stdout.write(line), redactor)
+    : undefined;
   let sandbox: DockerSandbox | null = null;
   let shell: ShellRunner | null = null;
   let compose: ComposeProject | null = null;
@@ -160,6 +169,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
         context,
         journal,
         redactor,
+        sink: streamSink,
         createHostWorkspace: makeHostWorkspace,
         createHostShellRunner: makeHostShellRunner,
         registerWorkspace: (workspace) => {
@@ -171,6 +181,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
         context,
         journal,
         redactor,
+        sink: streamSink,
         createSandbox,
         buildImage,
         makeShellRunner,
@@ -252,9 +263,14 @@ async function provisionDockerSandbox(input: {
   context: RuntimeContext;
   journal: RunJournal;
   redactor: (value: string) => string;
+  sink: StreamSink | undefined;
   createSandbox: (options: DockerSandboxOptions) => DockerSandbox;
   buildImage: typeof buildRuntimeImage;
-  makeShellRunner: (sandbox: DockerSandbox, env: Record<string, string>) => ShellRunner;
+  makeShellRunner: (
+    sandbox: DockerSandbox,
+    env: Record<string, string>,
+    sink?: StreamSink,
+  ) => ShellRunner;
   makeComposeProject: typeof createComposeProject;
   registerCompose: (project: ComposeProject) => void;
   registerSandbox: (sandbox: DockerSandbox) => void;
@@ -328,7 +344,7 @@ async function provisionDockerSandbox(input: {
 
   const sandbox = input.createSandbox(sandboxOptions);
   input.registerSandbox(sandbox);
-  const shell = input.makeShellRunner(sandbox, {});
+  const shell = input.makeShellRunner(sandbox, {}, input.sink);
 
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {
@@ -351,6 +367,7 @@ async function provisionDirectWorkspace(input: {
   context: RuntimeContext;
   journal: RunJournal;
   redactor: (value: string) => string;
+  sink: StreamSink | undefined;
   createHostWorkspace: typeof createHostWorkspace;
   createHostShellRunner: typeof createHostShellRunner;
   registerWorkspace: (workspace: HostWorkspace) => void;
@@ -362,7 +379,7 @@ async function provisionDirectWorkspace(input: {
   const cloneCredentials = runtimeCommandCredentials("clone", context);
   const workspace = await input.createHostWorkspace(context.runId);
   input.registerWorkspace(workspace);
-  const shell = input.createHostShellRunner(workspace.workspacePath, {});
+  const shell = input.createHostShellRunner(workspace.workspacePath, {}, input.sink);
 
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {

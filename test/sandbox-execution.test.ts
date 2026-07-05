@@ -3,7 +3,11 @@ import { mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createHostShellRunner, createHostWorkspace } from "../src/sandbox-execution.js";
+import {
+  createHostShellRunner,
+  createHostWorkspace,
+  createLineStreamSink,
+} from "../src/sandbox-execution.js";
 
 async function withWorkspace(
   fn: (workspacePath: string) => Promise<void>,
@@ -95,6 +99,37 @@ test("host shell runner leaves git askpass unset without a GitHub token", async 
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "unset");
+  });
+});
+
+test("line stream sink redacts complete lines and flushes the remainder", () => {
+  const lines: string[] = [];
+  const sink = createLineStreamSink(
+    (line) => lines.push(line),
+    (input) => input.replaceAll("hunter2", "[REDACTED]"),
+  );
+
+  sink.onData("token=");
+  sink.onData("hunter2\npartial");
+  assert.deepEqual(lines, ["token=[REDACTED]\n"]);
+
+  sink.flush();
+  assert.deepEqual(lines, ["token=[REDACTED]\n", "partial\n"]);
+});
+
+test("host shell runner streams live output while still buffering the result", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const streamed: string[] = [];
+    const sink = createLineStreamSink((line) => streamed.push(line));
+    const runner = createHostShellRunner(workspacePath, {}, sink);
+
+    const result = await runner.run("printf 'a\\nb\\n'");
+
+    // Buffered result is still available (needed for diff/review parsing).
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "a\nb");
+    // ...and the same output was streamed live, line-buffered.
+    assert.equal(streamed.join(""), "a\nb\n");
   });
 });
 
