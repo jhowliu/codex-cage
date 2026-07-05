@@ -61,6 +61,19 @@ test("host shell runner supports shell operators like the docker runner", async 
   });
 });
 
+test("host shell runner closes stdin so stdin-reading commands do not hang", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const runner = createHostShellRunner(workspacePath);
+
+    // `cat` with no file reads stdin until EOF. With stdin closed it returns
+    // immediately; without the fix this would hang forever.
+    const result = await runner.run("cat");
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout, "");
+  });
+});
+
 test("host shell runner configures git askpass when a GitHub token is present", async () => {
   await withWorkspace(async (workspacePath) => {
     const runner = createHostShellRunner(workspacePath, {

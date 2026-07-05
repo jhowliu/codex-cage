@@ -91,6 +91,11 @@ export function createHostShellRunner(
           shell: true,
           cwd: workspacePath,
           env: commandEnv,
+          // Close stdin so host commands get EOF immediately. Codex CLI's
+          // `exec` reads stdin and would otherwise hang waiting for input
+          // that never arrives (the Docker runner is immune because the
+          // container has no stdin attached).
+          stdin: "ignore",
           reject: false,
         },
       );
