@@ -7,6 +7,7 @@ import {
   createHostShellRunner,
   createHostWorkspace,
   createLineStreamSink,
+  hostCommandWithCodexAuth,
 } from "../src/sandbox-execution.js";
 
 async function withWorkspace(
@@ -100,6 +101,32 @@ test("host shell runner leaves git askpass unset without a GitHub token", async 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "unset");
   });
+});
+
+test("codex auth logs in with the API key when one is present", () => {
+  const wrapped = hostCommandWithCodexAuth("codex exec --model gpt", undefined, {
+    OPENAI_API_KEY: "sk-test",
+  });
+
+  assert.match(wrapped, /codex login --with-api-key/);
+  assert.match(wrapped, /CODEX_HOME="\$\(mktemp -d\)"/);
+  assert.doesNotMatch(wrapped, /cp .*auth\.json/);
+  assert.ok(wrapped.endsWith("codex exec --model gpt"));
+});
+
+test("codex auth copies the OAuth file when no API key is present", () => {
+  const wrapped = hostCommandWithCodexAuth(
+    "codex exec --model gpt",
+    "/host/.codex/auth.json",
+    {},
+  );
+
+  assert.match(wrapped, /cp '\/host\/\.codex\/auth\.json'/);
+  assert.doesNotMatch(wrapped, /codex login/);
+});
+
+test("codex auth is a no-op for commands without credentials", () => {
+  assert.equal(hostCommandWithCodexAuth("git status", undefined, {}), "git status");
 });
 
 test("line stream sink redacts complete lines and flushes the remainder", () => {
