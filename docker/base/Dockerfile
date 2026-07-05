@@ -4,6 +4,7 @@ ARG CODEX_CLI_VERSION=0.125.0
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
+    bubblewrap \
     ca-certificates \
     curl \
     git \
