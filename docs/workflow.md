@@ -90,7 +90,7 @@ runtime:
   dockerfile: null
 
 agent:
-  model: gpt-5.4
+  model: gpt-5.4-mini
   max_iterations: 5
   max_review_cycles: 2
 

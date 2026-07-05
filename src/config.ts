@@ -19,11 +19,15 @@ export const codexCageConfigSchema = z
       .default(() => ({ image: defaultSandboxImage, dockerfile: null })),
     agent: z
       .object({
-        model: z.string().default("gpt-5.4"),
+        model: z.string().default("gpt-5.4-mini"),
         max_iterations: z.number().int().positive().default(5),
         max_review_cycles: z.number().int().nonnegative().default(2),
       })
-      .default(() => ({ model: "gpt-5.4", max_iterations: 5, max_review_cycles: 2 })),
+      .default(() => ({
+        model: "gpt-5.4-mini",
+        max_iterations: 5,
+        max_review_cycles: 2,
+      })),
     timeouts: z
       .object({
         total_minutes: z.number().int().positive().default(90),
