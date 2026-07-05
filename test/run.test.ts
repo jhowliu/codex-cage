@@ -16,6 +16,12 @@ import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js"
 import { runCodexCage, type ShellRunner } from "../src/run.js";
 import { openRunStore } from "../src/state.js";
 
+// These tests inject Docker-mode fakes and must stay hermetic. Clear any
+// ambient CODEX_CAGE_EXECUTION (e.g. when the suite itself runs inside a
+// direct-mode Codex Cage run) so resolveExecutionMode does not switch
+// runCodexCage to real host execution and perform real clones / codex calls.
+delete process.env.CODEX_CAGE_EXECUTION;
+
 const repo: GithubRepo = {
   owner: "jhowliu",
   name: "codex-cage",
