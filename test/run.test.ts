@@ -13,7 +13,11 @@ import type { IssueContext } from "../src/issue.js";
 import type { CommandResult, PublishSuccessfulRunInput } from "../src/publish.js";
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
 import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js";
-import { runCodexCage, type ShellRunner } from "../src/run.js";
+import {
+  runCodexCage,
+  type RunCodexCageDependencies,
+  type ShellRunner,
+} from "../src/run.js";
 import { openRunStore } from "../src/state.js";
 
 const repo: GithubRepo = {
@@ -108,6 +112,114 @@ function passingReview(): RunIndependentReviewResult {
   };
 }
 
+// Shell that satisfies the happy path in both execution modes. Docker mode
+// clones via the fake sandbox, direct mode clones via the shell, so this
+// includes both `git clone` and `git fetch`.
+function happyPathShell(): ReturnType<typeof shellRunner> {
+  return shellRunner(
+    new Map([
+      ["git clone", commandResult()],
+      ["git fetch origin", commandResult()],
+      ["npm install", commandResult("setup passed")],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      [
+        "git add --intent-to-add",
+        commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+      ],
+    ]),
+  );
+}
+
+// Mode-specific provisioning fakes. Direct mode must never touch Docker; Docker
+// mode must never touch the host workspace.
+function modeDeps(
+  mode: "docker" | "direct",
+  shell: ShellRunner,
+  events: string[],
+): RunCodexCageDependencies {
+  if (mode === "direct") {
+    return {
+      executionMode: "direct",
+      createDockerSandbox: () => {
+        throw new Error("Docker sandbox must not be created in direct mode.");
+      },
+      createHostWorkspace: async () => ({
+        workspacePath: "/tmp/codex-cage-happy",
+        cleanup: async () => undefined,
+      }),
+      createHostShellRunner: () => shell,
+    };
+  }
+
+  return {
+    executionMode: "docker",
+    createHostWorkspace: () => {
+      throw new Error("Host workspace must not be created in docker mode.");
+    },
+    createDockerSandbox: () => fakeSandbox(events),
+    createShellRunner: () => shell,
+  };
+}
+
+for (const mode of ["docker", "direct"] as const) {
+  test(`runCodexCage reaches every gate and opens a PR in ${mode} mode`, async () => {
+    const cwd = await createProject(`
+setup:
+  - npm install
+verify:
+  - npm test
+`);
+    const events: string[] = [];
+    const shell = happyPathShell();
+
+    try {
+      const result = await runCodexCage(
+        { cwd, issueUrl: issue.url },
+        {
+          generateRunId: () => `run-happy-${mode}`,
+          readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+          findCodexAuthFile: async () => null,
+          fetchIssueContext: async () => issue,
+          resolveTargetRepo: async () => repoResolution,
+          createAuthenticatedRepo: () => ({
+            repo,
+            cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+            redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          }),
+          runIndependentReview: async () => passingReview(),
+          publishSuccessfulRun: async (input) => ({
+            branchName: input.branchName ?? `codex-cage/gh-26-${mode}`,
+            commitMessage: "#26 Wire run command",
+            prTitle: "#26 Wire run command",
+            prBody: "body",
+            prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+          }),
+          ...modeDeps(mode, shell, events),
+        },
+      );
+
+      // Engine outcome is mode-agnostic: same status, PR, and phase sequence.
+      assert.equal(result.status, "succeeded");
+      assert.equal(result.prUrl, "https://github.com/jhowliu/codex-cage/pull/26");
+
+      const store = await openRunStore(cwd);
+      const details = store.getRunDetails(`run-happy-${mode}`);
+      store.close();
+      assert.deepEqual(
+        details.phases.map((phase) => phase.name),
+        ["preflight", "cloning", "setup", "implement", "verify", "review", "pr"],
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+}
+
 test("runCodexCage parses review agent stdout without command log noise", async () => {
   const cwd = await createProject(`
 verify:
@@ -141,6 +253,7 @@ verify:
         issueUrl: issue.url,
       },
       {
+        executionMode: "docker",
         generateRunId: () => "run-review-stdout",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
         findCodexAuthFile: async () => null,
@@ -247,6 +360,7 @@ verify:
         issueUrl: issue.url,
       },
       {
+        executionMode: "docker",
         generateRunId: () => "run-test-123",
         readEnv: async () => ({
           GITHUB_TOKEN: "token-value",
@@ -407,7 +521,6 @@ verify:
 
 test("runCodexCage runs direct mode on the host without Docker resources", async () => {
   const cwd = await createProject(`
-execution: direct
 setup:
   - npm install
 verify:
@@ -446,6 +559,7 @@ services:
         issueUrl: issue.url,
       },
       {
+        executionMode: "direct",
         generateRunId: () => "run-direct-1",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
         findCodexAuthFile: async () => null,
@@ -547,6 +661,7 @@ verify:
         issueUrl: issue.url,
       },
       {
+        executionMode: "docker",
         generateRunId: () => "run-publish-redact",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
         findCodexAuthFile: async () => null,
@@ -619,6 +734,7 @@ runtime:
         issueUrl: issue.url,
       },
       {
+        executionMode: "docker",
         generateRunId: () => "run-image-123",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
         findCodexAuthFile: async () => null,
@@ -697,6 +813,7 @@ runtime:
         issueUrl: issue.url,
       },
       {
+        executionMode: "docker",
         generateRunId: () => "run-image-failed",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
         findCodexAuthFile: async () => null,
@@ -760,6 +877,7 @@ agent:
         issueUrl: issue.url,
       },
       {
+        executionMode: "docker",
         generateRunId: () => "run-test-failed",
         readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
         findCodexAuthFile: async () => null,

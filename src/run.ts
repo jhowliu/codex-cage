@@ -8,6 +8,7 @@ import {
   parseCodexCageConfig,
   resolveExecutionMode,
   type CodexCageConfig,
+  type ExecutionMode,
 } from "./config.js";
 import { prepareRunCredentials } from "./credentials.js";
 import {
@@ -63,6 +64,9 @@ export type RunCodexCageDependencies = {
   generateRunId?: () => string;
   findCodexAuthFile?: typeof findCodexAuthFile;
   onProgress?: (event: RunProgressEvent) => void;
+  // Overrides mode resolution (env > config > docker). Tests pin this so they
+  // are not influenced by an ambient CODEX_CAGE_EXECUTION.
+  executionMode?: ExecutionMode;
 };
 
 const configPath = ".codex-cage.yml";
@@ -160,10 +164,12 @@ async function prepareRuntimeContext(
     source: "configured" as const,
   };
   const promptContext = await buildPromptContext(cwd);
-  const executionMode = resolveExecutionMode({
-    env: process.env,
-    config: configResult.config,
-  });
+  const executionMode =
+    dependencies.executionMode ??
+    resolveExecutionMode({
+      env: process.env,
+      config: configResult.config,
+    });
 
   return {
     cwd,
