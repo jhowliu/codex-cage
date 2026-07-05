@@ -109,7 +109,11 @@ test("codex auth logs in with the API key when one is present", () => {
   });
 
   assert.match(wrapped, /codex login --with-api-key/);
-  assert.match(wrapped, /CODEX_HOME="\$\(mktemp -d\)"/);
+  // CODEX_HOME must live under $HOME, not /tmp (Codex refuses helper binaries there).
+  assert.match(
+    wrapped,
+    /CODEX_HOME="\$\(mktemp -d "\$\{HOME:-\/root\}\/\.codex-cage-home/,
+  );
   assert.doesNotMatch(wrapped, /cp .*auth\.json/);
   assert.ok(wrapped.endsWith("codex exec --model gpt"));
 });
