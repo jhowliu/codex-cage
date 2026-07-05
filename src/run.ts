@@ -42,6 +42,7 @@ export type RunCommandOptions = {
   base?: string | undefined;
   model?: string | undefined;
   draft?: boolean | undefined;
+  verbose?: boolean | undefined;
 };
 
 export type RunCodexCageDependencies = {
@@ -187,6 +188,7 @@ async function prepareRuntimeContext(
     runtimeImage,
     promptContext,
     executionMode,
+    verbose: options.verbose ?? false,
   };
 }
 
