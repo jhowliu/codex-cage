@@ -146,7 +146,7 @@ export function createHostShellRunner(
       const onData = options.onData ?? sink?.onData;
       const result = await execa(
         commandWithGitHubAuth(
-          hostCommandWithCodexAuth(command, options.codexAuthFilePath),
+          hostCommandWithCodexAuth(command, options.codexAuthFilePath, commandEnv),
           commandEnv,
         ),
         {
@@ -281,22 +281,39 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function hostCommandWithCodexAuth(
+export function hostCommandWithCodexAuth(
   command: string,
   codexAuthFilePath: string | undefined,
+  env: Record<string, string>,
 ): string {
-  if (codexAuthFilePath === undefined) {
+  const hasApiKey = env.OPENAI_API_KEY !== undefined;
+
+  if (!hasApiKey && codexAuthFilePath === undefined) {
     return command;
   }
 
-  const quoted = shellQuote(codexAuthFilePath);
-  return [
-    `if [ -f ${quoted} ] && [ -z "\${OPENAI_API_KEY:-}" ]; then mkdir -p "\${CODEX_HOME:-$HOME/.codex}"`,
-    `cp ${quoted} "\${CODEX_HOME:-$HOME/.codex}/auth.json"`,
-    `chmod 600 "\${CODEX_HOME:-$HOME/.codex}/auth.json"`,
-    "fi",
-    command,
-  ].join("; ");
+  const lines: string[] = [];
+
+  if (hasApiKey) {
+    // Log Codex in with the API key into an isolated CODEX_HOME so it uses the
+    // key instead of any ChatGPT/OAuth login, without touching the user's
+    // ~/.codex (config and MCP servers are skipped too, keeping runs clean).
+    lines.push(
+      'CODEX_HOME="$(mktemp -d)"; export CODEX_HOME',
+      'printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null 2>&1 || true',
+    );
+  } else if (codexAuthFilePath !== undefined) {
+    const quoted = shellQuote(codexAuthFilePath);
+    lines.push(
+      `if [ -f ${quoted} ]; then mkdir -p "\${CODEX_HOME:-$HOME/.codex}"`,
+      `cp ${quoted} "\${CODEX_HOME:-$HOME/.codex}/auth.json"`,
+      `chmod 600 "\${CODEX_HOME:-$HOME/.codex}/auth.json"`,
+      "fi",
+    );
+  }
+
+  lines.push(command);
+  return lines.join("; ");
 }
 
 function createShellCommandRunner(
