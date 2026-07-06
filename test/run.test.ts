@@ -214,6 +214,16 @@ verify:
         details.phases.map((phase) => phase.name),
         ["preflight", "cloning", "setup", "implement", "verify", "review", "pr"],
       );
+
+      // Direct mode bypasses Codex's sandbox (the runner is already isolated);
+      // Docker mode keeps it.
+      const implementCommand =
+        shell.commands.find((command) => command.includes("codex exec")) ?? "";
+      if (mode === "direct") {
+        assert.match(implementCommand, /--dangerously-bypass-approvals-and-sandbox/);
+      } else {
+        assert.match(implementCommand, /--sandbox 'workspace-write'/);
+      }
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

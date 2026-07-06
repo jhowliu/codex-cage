@@ -449,6 +449,7 @@ async function runImplementationLoop(input: {
           model: input.context.model,
           sandbox: "workspace-write",
           prompt,
+          bypassSandbox: input.context.executionMode === "direct",
         }),
         input.redactor,
         runtimeCommandCredentials("implement", input.context),

@@ -136,7 +136,11 @@ export async function runReviewGate(input: {
       reviewPolicyStatus,
       resultMetadata,
       readCurrentDiff: async () => await readCurrentDiff(input.shell),
-      runner: createReviewAgentRunner(input.shell, reviewCredentials),
+      runner: createReviewAgentRunner(
+        input.shell,
+        reviewCredentials,
+        input.context.executionMode === "direct",
+      ),
       ...(reviewCredentials.env === undefined ? {} : { env: reviewCredentials.env }),
     });
 
