@@ -362,3 +362,4 @@ npm --cache /tmp/codex-cage-npm-cache pack --dry-run
 ## License
 
 Codex Cage is licensed under the [Apache License 2.0](LICENSE).
+<!-- codex-cage smoke test -->
