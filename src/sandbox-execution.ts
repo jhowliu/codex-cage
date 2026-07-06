@@ -218,6 +218,7 @@ export function createGhCommandRunner(
 export function createReviewAgentRunner(
   shell: ShellRunner,
   options?: DockerCommandOptions,
+  bypassSandbox?: boolean,
 ): ReviewAgentRunner {
   return {
     async run(input): Promise<string> {
@@ -231,6 +232,7 @@ export function createReviewAgentRunner(
         sandbox: "read-only",
         outputSchemaPath,
         prompt: input.prompt,
+        bypassSandbox,
       })}`;
       const result = await shell.run(command, options);
 
@@ -248,14 +250,20 @@ export function codexExecCommand(input: {
   sandbox: "read-only" | "workspace-write";
   outputSchemaPath?: string | undefined;
   prompt: string;
+  bypassSandbox?: boolean | undefined;
 }): string {
-  const args = [
-    "codex exec",
-    "--model",
-    shellQuote(input.model),
-    "--sandbox",
-    shellQuote(input.sandbox),
-  ];
+  const args = ["codex exec", "--model", shellQuote(input.model)];
+
+  if (input.bypassSandbox === true) {
+    // Direct mode runs on an already-isolated, ephemeral runner where Codex's
+    // own bubblewrap sandbox cannot create network namespaces
+    // ("bwrap: loopback: ... Operation not permitted"). Skip Codex's sandbox
+    // and rely on the runner's isolation. Only safe because the host is
+    // externally sandboxed.
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    args.push("--sandbox", shellQuote(input.sandbox));
+  }
 
   if (input.outputSchemaPath !== undefined) {
     args.push("--output-schema", shellQuote(input.outputSchemaPath));

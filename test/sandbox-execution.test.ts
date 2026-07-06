@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  codexExecCommand,
   createHostShellRunner,
   createHostWorkspace,
   createLineStreamSink,
@@ -127,6 +128,29 @@ test("codex auth copies the OAuth file when no API key is present", () => {
 
 test("codex auth is a no-op for commands without credentials", () => {
   assert.equal(hostCommandWithCodexAuth("git status", undefined, {}), "git status");
+});
+
+test("codex exec uses the sandbox flag by default", () => {
+  const command = codexExecCommand({
+    model: "gpt",
+    sandbox: "workspace-write",
+    prompt: "do it",
+  });
+
+  assert.match(command, /--sandbox 'workspace-write'/);
+  assert.doesNotMatch(command, /--dangerously-bypass-approvals-and-sandbox/);
+});
+
+test("codex exec bypasses the sandbox in direct mode", () => {
+  const command = codexExecCommand({
+    model: "gpt",
+    sandbox: "workspace-write",
+    prompt: "do it",
+    bypassSandbox: true,
+  });
+
+  assert.match(command, /--dangerously-bypass-approvals-and-sandbox/);
+  assert.doesNotMatch(command, /--sandbox/);
 });
 
 test("line stream sink redacts complete lines and flushes the remainder", () => {
