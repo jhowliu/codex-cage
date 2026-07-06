@@ -307,7 +307,10 @@ export function hostCommandWithCodexAuth(
     // key instead of any ChatGPT/OAuth login, without touching the user's
     // ~/.codex (config and MCP servers are skipped too, keeping runs clean).
     lines.push(
-      'CODEX_HOME="$(mktemp -d)"; export CODEX_HOME',
+      // Keep CODEX_HOME under $HOME, not /tmp: Codex refuses to create its
+      // helper binaries (apply_patch, etc.) under a world-writable temp dir,
+      // which would leave it unable to edit files.
+      'CODEX_HOME="$(mktemp -d "${HOME:-/root}/.codex-cage-home.XXXXXX")"; export CODEX_HOME',
       'printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null 2>&1 || true',
     );
   } else if (codexAuthFilePath !== undefined) {
