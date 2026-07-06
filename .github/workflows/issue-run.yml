@@ -66,6 +66,12 @@ jobs:
       - name: Run Codex Cage
         run: node dist/src/cli.js run "$ISSUE_URL" --verbose --result-json "$RUNNER_TEMP/result.json"
 
+      - name: Mark issue ready for review
+        if: success()
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --add-label 'codex-cage:ready-for-review'
+
       - name: Report failure
         if: failure()
         run: |
