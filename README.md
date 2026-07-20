@@ -2,7 +2,7 @@
 
 Codex Cage is a lightweight CLI for running Codex against issue-driven work in an isolated Docker workspace. The CLI can initialize target repos, run the issue-driven orchestration loop, inspect local run metadata, and clean up managed Docker resources.
 
-Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
+Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md). For copy-pasteable command examples, see [docs/cli-examples.md](docs/cli-examples.md).
 
 ## Demo
 
@@ -36,6 +36,8 @@ npm exec -- codex-cage --help
 ```
 
 ## Run Codex Cage
+
+For more command examples, see the [CLI examples guide](docs/cli-examples.md).
 
 Run initialization inside the target repository:
 
