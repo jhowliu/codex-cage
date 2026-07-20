@@ -269,7 +269,9 @@ Linear issue URLs provide issue context but do not infer a GitHub repo. Use `--r
 
 ## Security Boundaries
 
-Codex Cage is designed so agent code runs in Docker-managed resources, not the host working tree.
+Codex Cage is designed so agent code runs in Docker-managed resources, not the host working tree. The complete threat model is documented in [security.md](security.md). Read it before running Codex Cage on a repository.
+
+The short version: Codex Cage uses a trusted-target-repository model. It is not a general untrusted-code sandbox. `.codex-cage.yml`, Docker Compose files, runtime Dockerfiles, setup commands, verify commands, package manager scripts, build scripts, and test scripts are executable trust boundaries.
 
 Current boundaries:
 
@@ -282,6 +284,7 @@ Current boundaries:
 - Secrets are passed as process environment and redacted from logs.
 - Diff guards block injected secrets, high-confidence token patterns, private keys, and sensitive auth files.
 - Compose services are orchestrator-managed and per-run isolated by project name.
+- Network egress remains enabled by default.
 
 Non-goals:
 
@@ -289,6 +292,8 @@ Non-goals:
 - Codex Cage does not guarantee protection against Docker daemon or kernel vulnerabilities.
 - Codex Cage does not manage cloud IAM or external secret rotation.
 - Codex Cage does not update Linear issues.
+
+Independent review is quality control, not a security boundary. Run artifacts under `.codex-cage/runs/<run-id>` and metadata in `.codex-cage/codex-cage.sqlite` are sensitive local data and are not deleted by cleanup.
 
 ## Base Image
 
