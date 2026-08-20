@@ -56,6 +56,21 @@ test("host shell runner merges base env with per-command env", async () => {
   });
 });
 
+test("host shell runner does not inherit ambient credentials", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const previous = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = "ambient-secret";
+    try {
+      const runner = createHostShellRunner(workspacePath);
+      const result = await runner.run('printf "%s" "${GITHUB_TOKEN:-unset}"');
+      assert.equal(result.stdout, "unset");
+    } finally {
+      if (previous === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = previous;
+    }
+  });
+});
+
 test("host shell runner supports shell operators like the docker runner", async () => {
   await withWorkspace(async (workspacePath) => {
     const runner = createHostShellRunner(workspacePath);
@@ -77,6 +92,26 @@ test("host shell runner closes stdin so stdin-reading commands do not hang", asy
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, "");
+  });
+});
+
+test("host shell runner enforces idle and total timeouts", async () => {
+  await withWorkspace(async (workspacePath) => {
+    const idleRunner = createHostShellRunner(workspacePath, {}, undefined, {
+      commandMs: 5_000,
+      idleMs: 20,
+      deadlineAt: Date.now() + 5_000,
+    });
+    const idleResult = await idleRunner.run("sleep 1");
+    assert.equal(idleResult.exitCode, 124);
+
+    const expiredRunner = createHostShellRunner(workspacePath, {}, undefined, {
+      commandMs: 5_000,
+      idleMs: 5_000,
+      deadlineAt: Date.now() - 1,
+    });
+    const expiredResult = await expiredRunner.run("sleep 1");
+    assert.equal(expiredResult.exitCode, 124);
   });
 });
 

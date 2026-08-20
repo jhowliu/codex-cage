@@ -1,6 +1,20 @@
 import { z } from "zod";
 import { defaultSandboxImage } from "./docker.js";
 
+const actionsRuntimeSchema = z.object({
+  image: z.string().min(1),
+  env: z.record(z.string()).optional(),
+  ports: z.array(z.string().min(1)).optional(),
+  options: z.string().min(1).optional(),
+});
+
+const defaultActionsLabels = {
+  run: "codex-cage:run",
+  in_progress: "codex-cage:in-progress",
+  ready: "codex-cage:ready-for-review",
+  blocked: "codex-cage:blocked",
+} as const;
+
 export const codexCageConfigSchema = z
   .object({
     setup: z.array(z.string()).default([]),
@@ -62,8 +76,45 @@ export const codexCageConfigSchema = z
       })
       .default(() => ({ max_secret_fix_attempts: 2 })),
     execution: z.enum(["docker", "direct"]).optional(),
+    actions: z
+      .object({
+        enabled: z.boolean().default(false),
+        workflow: z.string().min(1).default(".github/workflows/codex-cage.yml"),
+        codex_cage_version: z.string().min(1).nullable().default(null),
+        runner: z.string().min(1).default("ubuntu-latest"),
+        timeout_minutes: z.number().int().positive().default(90),
+        container: actionsRuntimeSchema.nullable().default(null),
+        services: z.record(actionsRuntimeSchema).default({}),
+        labels: z
+          .object({
+            run: z.string().min(1).default(defaultActionsLabels.run),
+            in_progress: z.string().min(1).default(defaultActionsLabels.in_progress),
+            ready: z.string().min(1).default(defaultActionsLabels.ready),
+            blocked: z.string().min(1).default(defaultActionsLabels.blocked),
+          })
+          .default(defaultActionsLabels),
+      })
+      .default(() => ({
+        enabled: false,
+        workflow: ".github/workflows/codex-cage.yml",
+        codex_cage_version: null,
+        runner: "ubuntu-latest",
+        timeout_minutes: 90,
+        container: null,
+        services: {},
+        labels: { ...defaultActionsLabels },
+      })),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((config, context) => {
+    if (config.actions.enabled && config.actions.codex_cage_version === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["actions", "codex_cage_version"],
+        message: "must be set when GitHub Actions is enabled",
+      });
+    }
+  });
 
 export type CodexCageConfig = z.infer<typeof codexCageConfigSchema>;
 
@@ -116,6 +167,7 @@ const knownTopLevelKeys = new Set([
   "issue",
   "guards",
   "execution",
+  "actions",
 ]);
 
 export function parseCodexCageConfig(input: unknown): ConfigParseResult {

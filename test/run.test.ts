@@ -507,7 +507,7 @@ verify:
     assert.match(reviewPrompt, /Verification summary:/);
     assert.match(
       reviewPrompt,
-      /Target review policy: present at \/workspace\/\.codex-cage\/review-policy\.md/,
+      /Target review policy: present at \.codex-cage\/review-policy\.md/,
     );
     assert.doesNotMatch(reviewPrompt, /Do not prompt-inject/);
     assert.match(reviewPolicyStatus, /Target review policy: present/);

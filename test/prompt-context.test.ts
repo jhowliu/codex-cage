@@ -41,11 +41,11 @@ test("buildPromptContext records present review policy without reading ignored i
 
     assert.deepEqual(context.reviewPolicy, {
       path: ".codex-cage/review-policy.md",
-      containerPath: "/workspace/.codex-cage/review-policy.md",
+      containerPath: ".codex-cage/review-policy.md",
       status: "present",
     });
     assert.match(formatted, /Target review policy: present/);
-    assert.match(formatted, /\/workspace\/\.codex-cage\/review-policy\.md/);
+    assert.match(formatted, /\.codex-cage\/review-policy\.md/);
     assert.doesNotMatch(JSON.stringify(context), /Agent secret rule/);
     assert.doesNotMatch(JSON.stringify(context), /Cage secret rule/);
     assert.doesNotMatch(JSON.stringify(context), /Copilot secret rule/);

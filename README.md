@@ -1,6 +1,6 @@
 # Codex Cage
 
-Codex Cage is a lightweight CLI for running Codex against issue-driven work in an isolated Docker workspace. The CLI can initialize target repos, run the issue-driven orchestration loop, inspect local run metadata, and clean up managed Docker resources.
+Codex Cage is a lightweight CLI for running Codex against issue-driven work in an isolated Docker workspace. The CLI configures target repos, runs the issue-driven orchestration loop, inspects local run metadata, and cleans up managed Docker resources.
 
 Full setup, token, configuration, security, and QA details live in [docs/workflow.md](docs/workflow.md).
 
@@ -37,13 +37,21 @@ npm exec -- codex-cage --help
 
 ## Run Codex Cage
 
-Run initialization inside the target repository:
+Run the guided setup inside the target repository:
 
 ```bash
-codex-cage init
+codex-cage setup
 ```
 
-Then edit `.codex-cage.yml` so `setup` installs the target repo dependencies and `verify` runs the real validation command:
+Codex Cage detects the package manager, verification command, and base branch. It configures local Docker runs and can optionally generate GitHub Actions automation. Re-run the same command whenever settings need to change.
+
+For a non-interactive setup using detected defaults:
+
+```bash
+codex-cage setup --yes --actions on
+```
+
+The resulting `.codex-cage.yml` remains the single configuration source:
 
 ```yaml
 setup:
@@ -53,7 +61,7 @@ verify:
   - npm test
 ```
 
-Create `.codex-cage.env` in the target repository with local secrets that must not be committed:
+The wizard can write local credentials to `.codex-cage.env` with restricted permissions. You can also create it manually:
 
 ```dotenv
 OPENAI_API_KEY=...
@@ -84,39 +92,49 @@ codex-cage runs show <run-id>
 
 Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI help.
 
-| Command                              | Purpose                                                                                 |
-| ------------------------------------ | --------------------------------------------------------------------------------------- |
-| `codex-cage init`                    | Create Codex Cage config files in the current repository.                               |
-| `codex-cage init --dockerfile`       | Also create `.codex-cage/Dockerfile` for target repos that need custom system packages. |
-| `codex-cage run <issue-url>`         | Run the full issue-to-PR workflow for a GitHub or Linear issue.                         |
-| `codex-cage run --issue <issue-url>` | Alternate issue URL form kept for compatibility.                                        |
-| `codex-cage runs list`               | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.                        |
-| `codex-cage runs show <run-id>`      | Show run metadata, phase status, and artifact paths.                                    |
-| `codex-cage cleanup`                 | Remove stale stopped Docker resources managed by Codex Cage.                            |
-| `codex-cage cleanup --all`           | Remove all managed Docker resources, including active ones.                             |
+| Command                         | Purpose                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `codex-cage setup`              | Configure local Docker runs and optional GitHub Actions automation.       |
+| `codex-cage doctor`             | Diagnose local tools, credentials, workflow, labels, and Actions secrets. |
+| `codex-cage run <issue-url>`    | Run the full issue-to-PR workflow for a GitHub or Linear issue.           |
+| `codex-cage runs list`          | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.          |
+| `codex-cage runs show <run-id>` | Show run metadata, phase status, and artifact paths.                      |
+| `codex-cage cleanup`            | Remove stale stopped Docker resources managed by Codex Cage.              |
+| `codex-cage cleanup --all`      | Remove all managed Docker resources, including active ones.               |
 
-### Initialize a Target Repo
+### Configure a Target Repo
 
 ```bash
-codex-cage init
+codex-cage setup
 ```
 
-This creates:
+Setup creates only the files required by the selected configuration:
 
 - `.codex-cage.yml`
-- `.codex-cage/review-policy.md`
-- `.codex-cage.env.example`
+- `.codex-cage/review-policy.md` when missing
+- `.codex-cage.env.example` when missing (missing keys are merged into an existing file)
 - `.gitignore` entries for local Codex Cage runtime state
+- `.codex-cage.env` when local credentials are entered
+- `.github/workflows/codex-cage.yml` when Actions automation is enabled
 
-Use `--dockerfile` when the target repo needs custom system packages:
+Useful automation options:
 
 ```bash
-codex-cage init --dockerfile
+codex-cage setup --yes --actions on
+codex-cage setup --yes --actions off
+codex-cage setup --dry-run
 ```
 
-The generated verify command intentionally fails until replaced with the target repo's real test command. Re-running `init` leaves existing config files in place and creates only missing managed files.
+Setup is safe to re-run. It preserves comments and unknown top-level configuration, updates only managed settings, and refuses to overwrite a workflow it did not generate. Disabling Actions removes only the generated workflow; repository labels and secrets remain untouched.
 
 Codex Cage relies on Codex CLI's native `AGENTS.md` handling for repository implementation guidance. It does not inject `AGENTS.md`, `.codex-cage/instructions.md`, `.github/copilot-instructions.md`, or `CLAUDE.md` contents into prompts. Independent review can use `.codex-cage/review-policy.md` for stricter project-specific checks; prompt artifacts record only whether that policy file is present and where the reviewer can read it.
+
+Run diagnostics at any time:
+
+```bash
+codex-cage doctor
+codex-cage doctor --json
+```
 
 ### Run an Issue
 
@@ -241,7 +259,7 @@ Module responsibilities:
 - `src/prompt-context.ts` and `src/review.ts`: prompt artifacts, review policy discovery, structured review execution, and review parsing.
 - `src/guards.ts`: diff and secret guard checks before publish.
 - `src/publish.ts`: branch, commit, push, and pull request creation.
-- `src/init.ts`: target-repo bootstrap files.
+- `src/setup.ts`: target-repo bootstrap files, local secrets, and managed GitHub Actions workflow.
 
 Architectural boundaries:
 

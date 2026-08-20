@@ -16,6 +16,7 @@ import {
   type RuntimeImageBuildResult,
 } from "./docker.js";
 import type { IssueContext } from "./issue.js";
+import { scanDiffForGuardViolations } from "./guards.js";
 import { NoDiffError, publishSuccessfulRun } from "./publish.js";
 import type { PromptContext } from "./prompt-context.js";
 import type { AuthenticatedRepo, RepoResolution } from "./repo.js";
@@ -41,6 +42,7 @@ import {
   shellQuote,
   type HostWorkspace,
   type ShellRunner,
+  type ShellTimeouts,
   type StreamSink,
 } from "./sandbox-execution.js";
 import type { FailureCode, PhaseName, RunStore } from "./state.js";
@@ -112,6 +114,7 @@ export type RunWorkflowInput = {
     sandbox: DockerSandbox,
     env: Record<string, string>,
     sink?: StreamSink,
+    timeouts?: ShellTimeouts,
   ) => ShellRunner;
   createHostWorkspace?: typeof createHostWorkspace;
   createHostShellRunner?: typeof createHostShellRunner;
@@ -139,6 +142,11 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
   const streamSink = context.verbose
     ? createLineStreamSink((line) => process.stdout.write(line), redactor)
     : undefined;
+  const shellTimeouts: ShellTimeouts = {
+    commandMs: context.config.timeouts.command_minutes * 60_000,
+    idleMs: context.config.timeouts.idle_minutes * 60_000,
+    deadlineAt: Date.now() + context.config.timeouts.total_minutes * 60_000,
+  };
   let sandbox: DockerSandbox | null = null;
   let shell: ShellRunner | null = null;
   let compose: ComposeProject | null = null;
@@ -152,6 +160,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
       config: context.config,
       warnings: context.configWarnings,
       repoSource: context.repoResolution.source,
+      executionMode: context.executionMode,
       runtimeImage: context.runtimeImage,
     });
 
@@ -172,6 +181,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
         sink: streamSink,
         createHostWorkspace: makeHostWorkspace,
         createHostShellRunner: makeHostShellRunner,
+        shellTimeouts,
         registerWorkspace: (workspace) => {
           hostWorkspace = workspace;
         },
@@ -186,6 +196,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
         buildImage,
         makeShellRunner,
         makeComposeProject,
+        shellTimeouts,
         registerCompose: (project) => {
           compose = project;
         },
@@ -216,6 +227,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
           return logs.join("\n");
         });
       } catch (error) {
+        if (error instanceof RunFailureError) throw error;
         throw new RunFailureError("setup_failed", formatError(error));
       }
     }
@@ -239,6 +251,19 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
     return runResult;
   } catch (error) {
     const failureCode = failureCodeFromError(error);
+    if (shell !== null) {
+      try {
+        const failedDiff = await readCurrentDiff(shell);
+        const violations = scanDiffForGuardViolations(failedDiff, {
+          injectedSecrets: context.credentials.injectedSecrets(),
+        });
+        if (failedDiff.trim() !== "" && violations.length === 0) {
+          await journal.writeArtifact("final.patch", redactor(failedDiff));
+        }
+      } catch {
+        // Failure reporting must not hide the original run failure.
+      }
+    }
     await journal.recordFailure(failureCode, error);
 
     const runResult: RunCodexCageResult = {
@@ -270,10 +295,12 @@ async function provisionDockerSandbox(input: {
     sandbox: DockerSandbox,
     env: Record<string, string>,
     sink?: StreamSink,
+    timeouts?: ShellTimeouts,
   ) => ShellRunner;
   makeComposeProject: typeof createComposeProject;
   registerCompose: (project: ComposeProject) => void;
   registerSandbox: (sandbox: DockerSandbox) => void;
+  shellTimeouts: ShellTimeouts;
 }): Promise<ShellRunner> {
   const { context, journal, redactor } = input;
   const runtimeDockerfile = context.config.runtime.dockerfile;
@@ -344,7 +371,7 @@ async function provisionDockerSandbox(input: {
 
   const sandbox = input.createSandbox(sandboxOptions);
   input.registerSandbox(sandbox);
-  const shell = input.makeShellRunner(sandbox, {}, input.sink);
+  const shell = input.makeShellRunner(sandbox, {}, input.sink, input.shellTimeouts);
 
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {
@@ -371,6 +398,7 @@ async function provisionDirectWorkspace(input: {
   createHostWorkspace: typeof createHostWorkspace;
   createHostShellRunner: typeof createHostShellRunner;
   registerWorkspace: (workspace: HostWorkspace) => void;
+  shellTimeouts: ShellTimeouts;
 }): Promise<ShellRunner> {
   const { context, journal, redactor } = input;
 
@@ -379,7 +407,12 @@ async function provisionDirectWorkspace(input: {
   const cloneCredentials = runtimeCommandCredentials("clone", context);
   const workspace = await input.createHostWorkspace(context.runId);
   input.registerWorkspace(workspace);
-  const shell = input.createHostShellRunner(workspace.workspacePath, {}, input.sink);
+  const shell = input.createHostShellRunner(
+    workspace.workspacePath,
+    {},
+    input.sink,
+    input.shellTimeouts,
+  );
 
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {
@@ -543,6 +576,9 @@ async function runVerificationCommands(input: {
 
   for (const command of input.commands) {
     const result = await input.shell.run(command, input.commandOptions);
+    if (result.exitCode === 124) {
+      throw new RunFailureError("timeout", formatCommandLog(command, result));
+    }
     const log = formatCommandLog(command, result);
     logs.push(log);
 

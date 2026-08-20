@@ -33,6 +33,8 @@ export type DockerCommandOptions = {
   codexAuthFilePath?: string | undefined;
   // Live output sink: receives stdout/stderr chunks as the command runs.
   onData?: ((chunk: string) => void) | undefined;
+  timeoutMs?: number | undefined;
+  idleTimeoutMs?: number | undefined;
 };
 
 export type DockerSandbox = {
