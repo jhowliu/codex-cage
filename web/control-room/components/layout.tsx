@@ -18,7 +18,7 @@ export function AppShell({
   overlays?: ReactNode;
 }): JSX.Element {
   return (
-    <div className="mx-auto flex min-h-[calc(100vh_-_48px)] w-[calc(100%_-_48px)] max-w-[1510px] overflow-hidden rounded-[28px] border border-white/75 bg-[#fbfcff] shadow-shell max-md:m-0 max-md:min-h-screen max-md:w-full max-md:rounded-none max-md:border-0">
+    <div className="flex min-h-dvh w-full overflow-hidden bg-[#fbfcff]">
       <aside className="flex w-56 shrink-0 flex-col border-r border-line bg-white px-[18px] pb-6 pt-[30px] max-md:w-[66px] max-md:basis-[66px] max-md:items-center max-md:px-2.5 max-md:py-6">
         <div className="flex items-center gap-[11px] px-2 text-[14px] font-extrabold tracking-[-0.03em] text-ink max-md:px-0">
           <div className="grid size-[38px] place-items-center rounded-[11px] border border-[#bad0ff] bg-blue-soft text-blue">
@@ -63,7 +63,7 @@ export function AppShell({
           </div>
         </div>
       </aside>
-      <main className="w-full min-w-0 max-w-[1280px] px-[39px] pb-[50px] pt-[27px] max-md:px-[18px] max-md:pb-[38px] max-md:pt-6">
+      <main className="min-w-0 flex-1 px-[39px] pb-[50px] pt-[27px] max-md:px-[18px] max-md:pb-[38px] max-md:pt-6">
         <header className="mb-[34px] flex min-h-[46px] items-center justify-between gap-6 max-sm:mb-7 max-sm:block">
           <div className="flex items-center gap-[7px] text-xs text-soft-muted">
             <span>Operations</span>

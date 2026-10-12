@@ -29,10 +29,7 @@
   }
 
   body {
-    @apply min-w-[320px] font-sans text-ink;
-    background:
-      radial-gradient(circle at 8% 2%, rgb(255 255 255 / 70%), transparent 30rem),
-      linear-gradient(135deg, #dfeaff 0%, #c6dcff 54%, #abc9fb 100%);
+    @apply min-w-[320px] bg-white font-sans text-ink;
   }
 
   button,
