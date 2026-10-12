@@ -11,6 +11,7 @@ import {
   type Snapshot,
 } from "./types";
 import { fetchJson, isGithubIssueUrl, pageFromHash } from "./utils";
+import "@fontsource-variable/inter";
 import "./styles.css";
 
 function App(): JSX.Element {
