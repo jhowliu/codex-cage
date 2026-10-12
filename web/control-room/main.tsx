@@ -17,7 +17,6 @@ import "./styles.css";
 function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [page, setPage] = useState<PageName>(() => pageFromHash());
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [repositorySearch, setRepositorySearch] = useState("");
   const [repositoryPath, setRepositoryPath] = useState("");
@@ -30,8 +29,6 @@ function App(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
-  const selectedRun =
-    snapshot.runs.find((run) => run.id === selectedRunId) ?? snapshot.runs[0] ?? null;
   const readyRepositories = snapshot.repositories.filter(
     (repository) => repository.status === "ready",
   );
@@ -147,21 +144,9 @@ function App(): JSX.Element {
         body: JSON.stringify({ repositoryId: selectedRepositoryId, issueUrl }),
       });
       setIssueUrl("");
-      setSelectedRunId(run.id);
       setTaskModalOpen(false);
       setTaskStep(1);
       setNotice(`Task ${run.id} queued`);
-      await refresh();
-    });
-  }
-
-  async function cancelRun(): Promise<void> {
-    if (selectedRun === null) return;
-    await runAction(async () => {
-      await fetchJson<Run>(`/api/runs/${encodeURIComponent(selectedRun.id)}/cancel`, {
-        method: "POST",
-      });
-      setNotice(`Stop requested for ${selectedRun.id}`);
       await refresh();
     });
   }
@@ -240,15 +225,7 @@ function App(): JSX.Element {
           onAddRepository={openRepositoryModal}
         />
       ) : (
-        <RunsPage
-          runs={snapshot.runs}
-          repositories={snapshot.repositories}
-          selectedRun={selectedRun}
-          onCreateTask={openTaskModal}
-          onSelectRun={setSelectedRunId}
-          onCancel={() => void cancelRun()}
-          onAddRepository={openRepositoryModal}
-        />
+        <RunsPage runs={snapshot.runs} onCreateTask={openTaskModal} />
       )}
     </AppShell>
   );

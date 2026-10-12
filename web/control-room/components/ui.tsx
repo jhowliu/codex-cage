@@ -23,18 +23,6 @@ export function statusPillClass(status: RunStatus): string {
   return `${base} bg-blue-soft text-blue`;
 }
 
-export function stageToneClass(
-  status: "running" | "succeeded" | "failed" | "pending",
-): string {
-  if (status === "succeeded")
-    return "text-green [&>span:first-child]:border-[#77cbaa] [&>span:first-child]:bg-green-soft";
-  if (status === "failed")
-    return "text-red [&>span:first-child]:border-[#e4a2a9] [&>span:first-child]:bg-red-soft";
-  if (status === "running")
-    return "text-blue [&>span:first-child]:border-[#8eacee] [&>span:first-child]:bg-blue-soft";
-  return "text-[#a6b0be]";
-}
-
 export function repositoryStatusClass(status: RepositoryStatus): string {
   return status === "ready" ? "bg-green shadow-[0_0_0_3px_#e6f7f0]" : "bg-amber";
 }
@@ -54,29 +42,6 @@ export function EmptyState({ onCreate }: { onCreate: () => void }): JSX.Element 
           <Icon name="plus" size={15} />
           Create first task
         </button>
-      </div>
-    </div>
-  );
-}
-
-export function EmptyDetail(): JSX.Element {
-  return (
-    <div className="min-w-0">
-      <div className="border-b border-[#dbe5f3] pb-[17px]">
-        <h2 className="text-[20px] font-bold tracking-[-0.04em] text-[#29344a]">
-          Task details
-        </h2>
-      </div>
-      <div className="grid min-h-[342px] place-items-center p-[25px] text-center text-muted">
-        <div>
-          <span className="mx-auto grid size-[52px] place-items-center rounded-full bg-[#eaf2ff] text-blue">
-            <Icon name="runs" size={24} />
-          </span>
-          <strong className="mt-5 block text-[15px] text-ink">Select a task</strong>
-          <p className="mb-0 mt-2 max-w-[220px] text-[12px] leading-[1.55]">
-            Select a task to inspect its stages, events, and published evidence.
-          </p>
-        </div>
       </div>
     </div>
   );
