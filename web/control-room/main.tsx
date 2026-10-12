@@ -218,7 +218,6 @@ function App(): JSX.Element {
       {page === "repositories" ? (
         <RepositoriesPage
           repositories={snapshot.repositories}
-          selectedRepository={selectedRepository}
           search={repositorySearch}
           onSearchChange={setRepositorySearch}
           onSelectRepository={setSelectedRepositoryId}

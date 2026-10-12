@@ -47,25 +47,6 @@ export function EmptyState({ onCreate }: { onCreate: () => void }): JSX.Element 
   );
 }
 
-export function DetailItem({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}): JSX.Element {
-  return (
-    <div className="grid gap-2 border-b border-[#dde5f0] py-[17px] last:border-b-0">
-      <dt className="text-[11px] font-semibold text-[#8292ad]">{label}</dt>
-      <dd className={`${mono ? "font-mono" : ""} m-0 text-[13px] text-[#33415e]`}>
-        {value}
-      </dd>
-    </div>
-  );
-}
-
 export function ModalIntro({
   title,
   copy,

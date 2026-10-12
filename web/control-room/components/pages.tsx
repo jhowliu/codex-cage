@@ -1,8 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Repository, Run } from "../types";
 import { formatTime, issueNumber } from "../utils";
 import {
-  DetailItem,
   EmptyState,
   Icon,
   panelClass,
@@ -68,19 +67,18 @@ export function RunsPage({
 
 export function RepositoriesPage({
   repositories,
-  selectedRepository,
   search,
   onSearchChange,
   onSelectRepository,
   onAddRepository,
 }: {
   repositories: Repository[];
-  selectedRepository: Repository | undefined;
   search: string;
   onSearchChange: (value: string) => void;
   onSelectRepository: (id: string) => void;
   onAddRepository: () => void;
 }): JSX.Element {
+  const [expandedRepositoryId, setExpandedRepositoryId] = useState<string | null>(null);
   const filteredRepositories = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return repositories.filter((repository) => {
@@ -107,10 +105,7 @@ export function RepositoriesPage({
           </button>
         }
       />
-      <section
-        className="grid grid-cols-[minmax(0,1fr)_310px] gap-[18px] max-lg:grid-cols-1"
-        id="repositories"
-      >
+      <section id="repositories">
         <div className="min-w-0">
           <label className="relative block max-w-[410px]">
             <span className="sr-only">Search repositories</span>
@@ -127,7 +122,7 @@ export function RepositoriesPage({
               placeholder="Search repositories..."
             />
           </label>
-          <div className="mt-[29px] grid grid-cols-[minmax(190px,1.45fr)_minmax(100px,0.7fr)_100px_24px] items-center gap-4 border-b border-[#dbe3ef] px-4 pb-[11px] font-mono text-[9px] font-bold text-[#7a8bab] max-sm:grid-cols-[minmax(0,1fr)_86px]">
+          <div className="mt-[29px] grid grid-cols-[minmax(190px,1.45fr)_minmax(100px,0.7fr)_100px_24px] items-center gap-4 border-b border-[#dbe3ef] px-4 pb-[11px] font-mono text-[9px] font-bold text-[#7a8bab] max-sm:grid-cols-[minmax(0,1fr)_68px_18px] max-sm:gap-2 max-sm:px-3">
             <span>Repository</span>
             <span className="max-sm:hidden">Source</span>
             <span>Status</span>
@@ -142,123 +137,140 @@ export function RepositoriesPage({
               </div>
             ) : (
               filteredRepositories.map((repository) => {
-                const selected = repository.id === selectedRepository?.id;
+                const expanded = repository.id === expandedRepositoryId;
+                const detailsId = `repository-${repository.id}-details`;
                 return (
-                  <button
-                    className={`relative grid min-h-[76px] w-full grid-cols-[minmax(190px,1.45fr)_minmax(100px,0.7fr)_100px_24px] items-center gap-4 rounded-[10px] border px-4 text-left transition max-sm:grid-cols-[minmax(0,1fr)_86px] ${selected ? "border-[#cbdafa] bg-[#f0f5ff] shadow-[0_4px_12px_rgb(40_87_175_/_5%)]" : "border-transparent hover:border-[#d8e2f3] hover:bg-[#f8faff]"}`}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => onSelectRepository(repository.id)}
-                    key={repository.id}
-                  >
-                    {selected && (
-                      <span
-                        className="absolute bottom-0 left-0 top-0 w-1 rounded-l-[10px] bg-blue"
-                        aria-hidden="true"
-                      />
-                    )}
-                    <span className="flex min-w-0 items-center gap-3">
-                      <span className="grid size-11 shrink-0 place-items-center rounded-[10px] bg-blue-soft text-blue">
-                        <Icon name="repo" size={22} />
-                      </span>
-                      <span className="grid min-w-0 gap-1">
-                        <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-[#29344a]">
-                          {repository.name}
-                        </strong>
-                        <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#7788a7]">
-                          {repository.fullName ?? repository.message}
+                  <div key={repository.id}>
+                    <button
+                      className={`relative grid min-h-[76px] w-full grid-cols-[minmax(190px,1.45fr)_minmax(100px,0.7fr)_100px_24px] items-center gap-4 border px-4 text-left transition max-sm:grid-cols-[minmax(0,1fr)_68px_18px] max-sm:gap-2 max-sm:px-3 ${expanded ? "rounded-t-[10px] border-[#cbdafa] bg-[#f0f5ff] shadow-[0_4px_12px_rgb(40_87_175_/_5%)]" : "rounded-[10px] border-transparent hover:border-[#d8e2f3] hover:bg-[#f8faff]"}`}
+                      type="button"
+                      aria-expanded={expanded}
+                      aria-controls={detailsId}
+                      onClick={() => {
+                        onSelectRepository(repository.id);
+                        setExpandedRepositoryId((currentId) =>
+                          currentId === repository.id ? null : repository.id,
+                        );
+                      }}
+                    >
+                      {expanded && (
+                        <span
+                          className="absolute bottom-0 left-0 top-0 w-1 rounded-tl-[10px] bg-blue"
+                          aria-hidden="true"
+                        />
+                      )}
+                      <span className="flex min-w-0 items-center gap-3 max-sm:gap-2">
+                        <span className="grid size-11 shrink-0 place-items-center rounded-[10px] bg-blue-soft text-blue max-sm:size-9">
+                          <Icon name="repo" size={22} />
+                        </span>
+                        <span className="grid min-w-0 gap-1">
+                          <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-[#29344a]">
+                            {repository.name}
+                          </strong>
+                          <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#7788a7]">
+                            {repository.fullName ?? repository.message}
+                          </span>
                         </span>
                       </span>
-                    </span>
-                    <span className="flex items-center gap-2 text-[12px] text-[#42506a] max-sm:hidden">
-                      <span className="grid size-5 place-items-center rounded-full bg-[#202b3c] text-white">
-                        <Icon name="github" size={13} />
+                      <span className="flex items-center gap-2 text-[12px] text-[#42506a] max-sm:hidden">
+                        <span className="grid size-5 place-items-center rounded-full bg-[#202b3c] text-white">
+                          <Icon name="github" size={13} />
+                        </span>
+                        {repository.fullName === null ? "Local" : "GitHub"}
                       </span>
-                      {repository.fullName === null ? "Local" : "GitHub"}
-                    </span>
-                    <span className="flex items-center gap-2 text-[12px] font-medium">
+                      <span className="flex items-center gap-2 text-[12px] font-medium max-sm:gap-1.5 max-sm:text-[11px]">
+                        <span
+                          className={`size-2 rounded-full ${repositoryStatusClass(repository.status)}`}
+                        />
+                        <span
+                          className={
+                            repository.status === "ready" ? "text-green" : "text-amber"
+                          }
+                        >
+                          {repository.status === "ready" ? "Ready" : "Review"}
+                        </span>
+                      </span>
                       <span
-                        className={`size-2 rounded-full ${repositoryStatusClass(repository.status)}`}
-                      />
-                      <span
-                        className={
-                          repository.status === "ready" ? "text-green" : "text-amber"
-                        }
+                        className="grid place-items-center text-[#7d8daa]"
+                        aria-hidden="true"
                       >
-                        {repository.status === "ready" ? "Ready" : "Review"}
+                        <Icon
+                          name="chevron-right"
+                          size={18}
+                          className={`transition-transform ${expanded ? "rotate-90" : ""}`}
+                        />
                       </span>
-                    </span>
-                    <span className="text-center text-[#7d8daa]" aria-hidden="true">
-                      <Icon name="more" size={18} />
-                    </span>
-                  </button>
+                    </button>
+                    {expanded && (
+                      <RepositoryInlineDetails id={detailsId} repository={repository} />
+                    )}
+                  </div>
                 );
               })
             )}
           </div>
-          {repositories.length > 0 && (
-            <p className="mt-[20px] text-[11px] text-[#8a9ab6]">
-              Select a repository to view its configuration.
-            </p>
-          )}
         </div>
-        <aside className="rounded-[12px] border border-[#d6e1f2] bg-gradient-to-b from-[#f4f8ff] to-white p-[21px] shadow-[0_4px_14px_rgb(44_86_159_/_4%)]">
-          <h2 className="border-b border-[#dde5f0] pb-[17px] text-[20px] font-bold tracking-[-0.04em] text-[#29344a]">
-            Repository details
-          </h2>
-          {selectedRepository === undefined ? (
-            <p className="py-7 text-[11px] text-muted">
-              Select a repository to inspect it.
-            </p>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 border-b border-[#dde5f0] py-[21px]">
-                <span className="grid size-12 shrink-0 place-items-center rounded-[11px] bg-[#e6efff] text-blue">
-                  <Icon name="repo" size={24} />
-                </span>
-                <span className="grid min-w-0 gap-1">
-                  <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-[15px] text-[#29344a]">
-                    {selectedRepository.name}
-                  </strong>
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#7182a2]">
-                    {selectedRepository.fullName ?? selectedRepository.message}
-                  </span>
-                  <span
-                    className={`flex items-center gap-2 text-[12px] font-medium ${selectedRepository.status === "ready" ? "text-green" : "text-amber"}`}
-                  >
-                    <span
-                      className={`size-2 rounded-full ${repositoryStatusClass(selectedRepository.status)}`}
-                    />
-                    {selectedRepository.status === "ready" ? "Ready" : "Review required"}
-                  </span>
-                </span>
-              </div>
-              <dl className="grid gap-0">
-                <DetailItem
-                  label="Source"
-                  value={selectedRepository.fullName === null ? "Local" : "GitHub"}
-                />
-                <DetailItem label="Runner configuration" value=".codex-cage.yml" mono />
-                <DetailItem
-                  label="Policy status"
-                  value={selectedRepository.status.replaceAll("_", " ")}
-                />
-              </dl>
-              {selectedRepository.fullName !== null && (
-                <a
-                  className="mt-[22px] flex items-center justify-center gap-1.5 text-[12px] font-semibold text-blue hover:underline"
-                  href={`https://github.com/${selectedRepository.fullName}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open on GitHub <Icon name="external" size={14} />
-                </a>
-              )}
-            </>
-          )}
-        </aside>
       </section>
     </>
+  );
+}
+
+function RepositoryInlineDetails({
+  id,
+  repository,
+}: {
+  id: string;
+  repository: Repository;
+}): JSX.Element {
+  return (
+    <div
+      className="-mt-px grid grid-cols-[repeat(3,minmax(0,1fr))_auto] items-center gap-4 rounded-b-[10px] border border-[#cbdafa] bg-[#f8faff] px-4 py-3 shadow-[0_5px_12px_rgb(40_87_175_/_4%)] max-md:grid-cols-2"
+      id={id}
+    >
+      <RepositoryDetail
+        label="Source"
+        value={repository.fullName === null ? "Local" : "GitHub"}
+      />
+      <RepositoryDetail label="Runner config" value=".codex-cage.yml" mono />
+      <RepositoryDetail
+        label="Policy status"
+        value={repository.status === "ready" ? "Ready" : "Review required"}
+      />
+      {repository.fullName !== null && (
+        <a
+          className="inline-flex min-h-10 items-center justify-self-end gap-1.5 whitespace-nowrap text-[12px] font-semibold text-blue hover:underline max-md:justify-self-start"
+          href={`https://github.com/${repository.fullName}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open on GitHub <Icon name="external" size={14} />
+        </a>
+      )}
+    </div>
+  );
+}
+
+function RepositoryDetail({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}): JSX.Element {
+  return (
+    <span className="grid min-w-0 gap-1">
+      <small className="text-[9px] font-semibold uppercase tracking-[0.04em] text-[#8292ad]">
+        {label}
+      </small>
+      <strong
+        className={`${mono ? "font-mono" : ""} overflow-hidden text-ellipsis whitespace-nowrap text-[12px] font-medium text-[#33415e]`}
+        title={value}
+      >
+        {value}
+      </strong>
+    </span>
   );
 }
 
