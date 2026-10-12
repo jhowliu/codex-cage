@@ -109,11 +109,11 @@ export function ModalIntro({
   copy: string;
 }): JSX.Element {
   return (
-    <div className="mb-[30px] grid gap-2">
-      <h3 className="text-[30px] font-bold leading-tight tracking-[-0.035em] text-[#142541] max-sm:text-[23px]">
+    <div className="mb-6 grid gap-1.5">
+      <h3 className="text-[24px] font-bold leading-tight tracking-[-0.035em] text-[#142541] max-sm:text-[21px]">
         {title}
       </h3>
-      <p className="m-0 text-[18px] text-[#7185a4] max-sm:text-[13px]">{copy}</p>
+      <p className="m-0 text-[14px] text-[#7185a4] max-sm:text-[12px]">{copy}</p>
     </div>
   );
 }
