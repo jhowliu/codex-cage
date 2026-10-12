@@ -19,6 +19,7 @@ export type IconName =
   | "external"
   | "grid"
   | "github"
+  | "info"
   | "more"
   | "plus"
   | "refresh"

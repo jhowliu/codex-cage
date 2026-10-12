@@ -102,23 +102,18 @@ export function DetailItem({
 }
 
 export function ModalIntro({
-  number,
   title,
   copy,
 }: {
-  number: string;
   title: string;
   copy: string;
 }): JSX.Element {
   return (
-    <div className="mb-[23px] flex items-start gap-3">
-      <span className="grid size-[31px] shrink-0 place-items-center rounded-[9px] bg-blue-soft font-mono text-[10px] font-bold text-blue">
-        {number}
-      </span>
-      <div>
-        <h3 className="mb-1 text-base font-bold text-[#344158]">{title}</h3>
-        <p className="m-0 text-[11px] text-muted">{copy}</p>
-      </div>
+    <div className="mb-[30px] grid gap-2">
+      <h3 className="text-[30px] font-bold leading-tight tracking-[-0.035em] text-[#142541] max-sm:text-[23px]">
+        {title}
+      </h3>
+      <p className="m-0 text-[18px] text-[#7185a4] max-sm:text-[13px]">{copy}</p>
     </div>
   );
 }
@@ -187,6 +182,12 @@ export function Icon({
         stroke="none"
         d="M12 3a9 9 0 0 0-2.85 17.53c.45.08.62-.2.62-.44v-1.55c-2.52.55-3.05-1.06-3.05-1.06-.41-1.04-1-1.32-1-1.32-.82-.56.06-.55.06-.55.9.07 1.37.93 1.37.93.8 1.37 2.1.98 2.62.75.08-.58.31-.98.57-1.2-2.01-.23-4.13-1.01-4.13-4.49 0-.99.35-1.8.92-2.43-.09-.23-.4-1.15.09-2.4 0 0 .75-.24 2.48.93A8.62 8.62 0 0 1 12 7.4c.76 0 1.52.1 2.23.3 1.7-1.17 2.46-.93 2.46-.93.49 1.25.18 2.17.09 2.4.57.63.92.82.6 1.66v2.35c0 .24.16.52.62.43A9 9 0 0 0 12 3Z"
       />
+    ),
+    info: (
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 10.5v5M12 7.5v.1" />
+      </>
     ),
     more: (
       <>
