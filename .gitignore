@@ -9,4 +9,5 @@ recap.md
 .codex-cage.env
 .codex-cage/runs/
 .codex-cage/*.sqlite
+.codex-cage/control-room.json
 .codex

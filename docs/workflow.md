@@ -24,6 +24,33 @@ npm exec -- codex-cage --help
 
 Node.js `>=22` is required.
 
+## Local Control Room
+
+Start the local Control Room from a host repository:
+
+```bash
+codex-cage control-room
+```
+
+The server binds to `127.0.0.1` by default. Use `--port 0` to select an available
+port, or provide an explicit local port:
+
+```bash
+codex-cage control-room --port 4317
+```
+
+The first Control Room slice supports one local repository and GitHub Issue URLs.
+It reads the repository's `.codex-cage.yml`, refuses to dispatch repositories that
+are not ready, starts the existing Docker-isolated Run workflow in a child Runner,
+and streams the Runner's structured Stage events to the browser. Run state is
+persisted in `.codex-cage/control-room.json`; full logs and other artifacts remain
+under the existing `.codex-cage/runs/<run-id>/` directory.
+
+The Control Room does not expose Docker controls to the browser. The Runner remains
+the execution authority, while the Control Room stores a projection of its validated
+events. GitHub-hosted Actions remains a separate direct-mode workflow and is not
+made live by the local Control Room.
+
 ## Token Setup
 
 Create `.codex-cage.env` in the host repo where you run Codex Cage:

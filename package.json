@@ -13,7 +13,7 @@
     "docker/base"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
     "qa": "npm run build && node --test \"dist/test/qa.test.js\"",
@@ -27,14 +27,22 @@
   "dependencies": {
     "commander": "^13.1.0",
     "execa": "^9.5.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "sql.js": "^1.12.0",
     "yaml": "^2.7.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.13.1",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
     "@types/sql.js": "^1.4.9",
+    "@vitejs/plugin-react": "^5.0.4",
     "prettier": "^3.5.1",
-    "typescript": "^5.7.3"
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.7.3",
+    "vite": "^7.1.5"
   }
 }

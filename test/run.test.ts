@@ -10,15 +10,26 @@ import {
   type DockerSandboxOptions,
 } from "../src/docker.js";
 import type { IssueContext } from "../src/issue.js";
-import type { CommandResult, PublishSuccessfulRunInput } from "../src/publish.js";
+import {
+  NoDiffError,
+  type CommandResult,
+  type PublishSuccessfulRunInput,
+} from "../src/publish.js";
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
 import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js";
 import {
   runCodexCage,
   type RunCodexCageDependencies,
+  type RunProgressEvent,
   type ShellRunner,
 } from "../src/run.js";
-import { openRunStore } from "../src/state.js";
+import {
+  parseRunEventLine,
+  replayRunEventJournal,
+  type CanonicalStage,
+  type RunEvent,
+} from "../src/run/events.js";
+import { openRunStore, type FailureCode } from "../src/state.js";
 
 const repo: GithubRepo = {
   owner: "jhowliu",
@@ -49,6 +60,17 @@ async function createProject(config: string): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-run-"));
   await writeFile(join(cwd, ".codex-cage.yml"), config, "utf8");
   return cwd;
+}
+
+async function readRunEvents(cwd: string, runId: string): Promise<RunEvent[]> {
+  const content = await readFile(
+    join(cwd, ".codex-cage", "runs", runId, "events.ndjson"),
+    "utf8",
+  );
+  return content
+    .split(/\r?\n/)
+    .filter((line) => line !== "")
+    .map(parseRunEventLine);
 }
 
 function fakeSandbox(events: string[]): DockerSandbox {
@@ -175,6 +197,8 @@ verify:
   - npm test
 `);
     const events: string[] = [];
+    const runnerEvents: RunEvent[] = [];
+    const progressEvents: RunProgressEvent[] = [];
     const shell = happyPathShell();
 
     try {
@@ -199,6 +223,12 @@ verify:
             prBody: "body",
             prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
           }),
+          onEvent: (event) => {
+            runnerEvents.push(event);
+          },
+          onProgress: (event) => {
+            progressEvents.push(event);
+          },
           ...modeDeps(mode, shell, events),
         },
       );
@@ -214,6 +244,56 @@ verify:
         details.phases.map((phase) => phase.name),
         ["preflight", "cloning", "setup", "implement", "verify", "review", "pr"],
       );
+
+      const persistedEvents = await readRunEvents(cwd, `run-happy-${mode}`);
+      const replay = await replayRunEventJournal(
+        join(cwd, ".codex-cage", "runs", `run-happy-${mode}`, "events.ndjson"),
+      );
+      assert.deepEqual(runnerEvents, persistedEvents);
+      assert.doesNotMatch(JSON.stringify(persistedEvents), /tests passed|implemented/);
+      assert.deepEqual(
+        persistedEvents.map((event) => event.sequence),
+        persistedEvents.map((_, index) => index + 1),
+      );
+      assert.equal(replay.status, "succeeded");
+      assert.deepEqual(
+        replay.stages.map((stage) => [stage.stage, stage.attempt, stage.status]),
+        [
+          ["prepare", 1, "succeeded"],
+          ["implement", 1, "succeeded"],
+          ["verify", 1, "succeeded"],
+          ["review", 1, "succeeded"],
+          ["publish", 1, "succeeded"],
+        ],
+      );
+      assert.deepEqual(
+        persistedEvents
+          .filter((event) => event.type === "activity.started")
+          .map((event) => [event.stage, event.payload.activity]),
+        [
+          ["prepare", "preflight"],
+          ["prepare", "cloning"],
+          ["prepare", "setup"],
+          ["implement", "implement"],
+          ["verify", "verify"],
+          ["review", "review"],
+          ["publish", "pr"],
+        ],
+      );
+      for (const eventType of [
+        "command.finished",
+        "verification.updated",
+        "review.finished",
+        "artifact.created",
+        "change.created",
+      ] as const) {
+        assert.ok(
+          persistedEvents.some((event) => event.type === eventType),
+          `expected ${eventType}`,
+        );
+      }
+      assert.equal(progressEvents[0]?.type, "run_started");
+      assert.equal(progressEvents.at(-1)?.type, "run_finished");
 
       // Direct mode bypasses Codex's sandbox (the runner is already isolated);
       // Docker mode keeps it.
@@ -646,8 +726,9 @@ test("runCodexCage redacts credential-bearing publish failures in artifacts", as
   const cwd = await createProject(`
 verify:
   - npm test
-`);
+  `);
   const events: string[] = [];
+  const deliveredEvents: RunEvent[] = [];
   const shell = shellRunner(
     new Map([
       ["git fetch origin", commandResult()],
@@ -690,12 +771,17 @@ verify:
             "push failed: https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
           );
         },
+        onEvent: (event) => {
+          deliveredEvents.push(event);
+        },
       },
     );
 
     const runDirectory = join(cwd, ".codex-cage", "runs", "run-publish-redact");
     const prLog = await readFile(join(runDirectory, "pr.log"), "utf8");
     const summary = await readFile(join(runDirectory, "summary.md"), "utf8");
+    const eventJournal = await readFile(join(runDirectory, "events.ndjson"), "utf8");
+    const replay = await replayRunEventJournal(join(runDirectory, "events.ndjson"));
 
     assert.deepEqual(result, {
       runId: "run-publish-redact",
@@ -705,7 +791,19 @@ verify:
     });
     assert.doesNotMatch(prLog, /token-value/);
     assert.doesNotMatch(summary, /token-value/);
+    assert.doesNotMatch(eventJournal, /token-value/);
+    assert.doesNotMatch(JSON.stringify(deliveredEvents), /token-value/);
     assert.match(prLog, /x-access-token:\[REDACTED\]@github\.com/);
+    assert.equal(replay.status, "failed");
+    assert.equal(replay.failureCode, "pr_failed");
+    assert.deepEqual(replay.stages.at(-1), {
+      stage: "publish",
+      attempt: 1,
+      status: "failed",
+      startedAt: replay.stages.at(-1)?.startedAt,
+      finishedAt: replay.stages.at(-1)?.finishedAt,
+      failureCode: "pr_failed",
+    });
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -802,6 +900,17 @@ runtime:
     );
     assert.match(runtimeImage, /codex-cage\/runtime-run-image-123:latest/);
     assert.match(runtimeImage, /"source": "built"/);
+
+    const runnerEvents = await readRunEvents(cwd, "run-image-123");
+    const runtimeImageActivity = runnerEvents.find(
+      (event) =>
+        event.type === "activity.started" && event.payload.activity === "runtime_image",
+    );
+    assert.equal(runtimeImageActivity?.type, "activity.started");
+    if (runtimeImageActivity?.type === "activity.started") {
+      assert.equal(runtimeImageActivity.stage, "prepare");
+      assert.equal(runtimeImageActivity.stageAttempt, 1);
+    }
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -859,6 +968,15 @@ runtime:
     assert.equal(details.run.failureCode, "runtime_image_failed");
     assert.equal(details.phases.at(-1)?.name, "runtime_image");
     assert.equal(details.phases.at(-1)?.status, "failed");
+
+    const replay = await replayRunEventJournal(
+      join(cwd, ".codex-cage", "runs", "run-image-failed", "events.ndjson"),
+    );
+    assert.equal(replay.status, "failed");
+    assert.deepEqual(
+      replay.stages.map((stage) => [stage.stage, stage.status, stage.failureCode]),
+      [["prepare", "failed", "runtime_image_failed"]],
+    );
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -918,7 +1036,345 @@ agent:
     assert.equal(details.run.failureCode, "verify_failed");
     assert.equal(details.phases.at(-1)?.name, "verify");
     assert.equal(details.phases.at(-1)?.status, "failed");
+
+    const replay = await replayRunEventJournal(
+      join(cwd, ".codex-cage", "runs", "run-test-failed", "events.ndjson"),
+    );
+    assert.equal(replay.status, "failed");
+    assert.equal(replay.failureCode, "verify_failed");
+    assert.deepEqual(
+      replay.stages.map((stage) => [stage.stage, stage.attempt, stage.status]),
+      [
+        ["prepare", 1, "succeeded"],
+        ["implement", 1, "succeeded"],
+        ["verify", 1, "failed"],
+      ],
+    );
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("runCodexCage records retries as distinct canonical Stage Attempts", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+agent:
+  max_iterations: 2
+`);
+  const sandboxEvents: string[] = [];
+  let verificationCalls = 0;
+  const diff = `diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`;
+  const shell: ShellRunner = {
+    async run(command): Promise<CommandResult> {
+      if (command.includes("git fetch origin")) return commandResult();
+      if (command.includes("codex exec")) return commandResult("implemented");
+      if (command === "npm test") {
+        verificationCalls += 1;
+        return verificationCalls === 1
+          ? commandResult("", 1, "tests failed")
+          : commandResult("tests passed");
+      }
+      if (command.includes("git add --intent-to-add")) return commandResult(diff);
+      throw new Error(`Unexpected shell command: ${command}`);
+    },
+  };
+
+  try {
+    const result = await runCodexCage(
+      { cwd, issueUrl: issue.url },
+      {
+        executionMode: "docker",
+        generateRunId: () => "run-retry-events",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(sandboxEvents),
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async (input) => ({
+          branchName: input.branchName ?? "codex-cage/retry",
+          commitMessage: "retry succeeded",
+          prTitle: "retry succeeded",
+          prBody: "body",
+          prUrl: "https://github.com/jhowliu/codex-cage/pull/105",
+        }),
+      },
+    );
+
+    assert.equal(result.status, "succeeded");
+    const replay = await replayRunEventJournal(
+      join(cwd, ".codex-cage", "runs", "run-retry-events", "events.ndjson"),
+    );
+    const events = await readRunEvents(cwd, "run-retry-events");
+
+    assert.deepEqual(
+      replay.stages.map((stage) => [stage.stage, stage.attempt, stage.status]),
+      [
+        ["prepare", 1, "succeeded"],
+        ["implement", 1, "succeeded"],
+        ["verify", 1, "failed"],
+        ["implement", 2, "succeeded"],
+        ["verify", 2, "succeeded"],
+        ["review", 1, "succeeded"],
+        ["publish", 1, "succeeded"],
+      ],
+    );
+    assert.deepEqual(
+      events
+        .filter((event) => event.type === "implementation.iteration_started")
+        .map((event) => [event.stageAttempt, event.payload.iteration]),
+      [
+        [1, 1],
+        [2, 2],
+      ],
+    );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+type ReplayableFailureScenario = {
+  name: string;
+  runId: string;
+  config: string;
+  failureCode: FailureCode;
+  failedStage: CanonicalStage;
+  shell: () => ReturnType<typeof shellRunner>;
+  review?: NonNullable<RunCodexCageDependencies["runIndependentReview"]>;
+  publish?: NonNullable<RunCodexCageDependencies["publishSuccessfulRun"]>;
+};
+
+const replayableFailureScenarios: readonly ReplayableFailureScenario[] = [
+  {
+    name: "review blocking",
+    runId: "run-review-blocking-events",
+    config: `
+verify:
+  - npm test
+agent:
+  max_iterations: 1
+  max_review_cycles: 0
+`,
+    failureCode: "review_blocking",
+    failedStage: "review",
+    shell: () =>
+      shellRunner(
+        new Map([
+          ["git fetch origin", commandResult()],
+          ["codex exec", commandResult("implemented")],
+          ["npm test", commandResult("tests passed")],
+          [
+            "git add --intent-to-add",
+            commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+          ],
+        ]),
+      ),
+    review: async () => ({
+      report: {
+        decision: "blocking",
+        summary: "Required behavior is missing.",
+        findings: [
+          {
+            severity: "blocking",
+            message: "Add the missing behavior.",
+            path: "src/app.ts",
+            line: 2,
+          },
+        ],
+      },
+      nextAction: {
+        action: "fail",
+        failureCode: "review_blocking",
+        feedback: "Add the missing behavior.",
+      },
+    }),
+  },
+  {
+    name: "secret guard exhaustion",
+    runId: "run-secret-guard-events",
+    config: `
+verify:
+  - npm test
+agent:
+  max_iterations: 1
+guards:
+  max_secret_fix_attempts: 0
+`,
+    failureCode: "secret_guard_failed",
+    failedStage: "verify",
+    shell: () =>
+      shellRunner(
+        new Map([
+          ["git fetch origin", commandResult()],
+          ["codex exec", commandResult("implemented")],
+          ["npm test", commandResult("tests passed")],
+          [
+            "git add --intent-to-add",
+            commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const token = "token-value";
+`),
+          ],
+        ]),
+      ),
+  },
+  {
+    name: "verification timeout",
+    runId: "run-timeout-events",
+    config: `
+verify:
+  - npm test
+agent:
+  max_iterations: 1
+`,
+    failureCode: "timeout",
+    failedStage: "verify",
+    shell: () =>
+      shellRunner(
+        new Map([
+          ["git fetch origin", commandResult()],
+          ["codex exec", commandResult("implemented")],
+          ["npm test", commandResult("", 124, "command timed out")],
+        ]),
+      ),
+  },
+  {
+    name: "no diff publish",
+    runId: "run-no-diff-events",
+    config: `
+verify:
+  - npm test
+agent:
+  max_iterations: 1
+`,
+    failureCode: "no_diff",
+    failedStage: "publish",
+    shell: () =>
+      shellRunner(
+        new Map([
+          ["git fetch origin", commandResult()],
+          ["codex exec", commandResult("implemented")],
+          ["npm test", commandResult("tests passed")],
+          [
+            "git add --intent-to-add",
+            commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+          ],
+        ]),
+      ),
+    publish: async () => {
+      throw new NoDiffError();
+    },
+  },
+];
+
+for (const scenario of replayableFailureScenarios) {
+  test(`runCodexCage writes a replayable terminal history for ${scenario.name}`, async () => {
+    const cwd = await createProject(scenario.config);
+    const sandboxEvents: string[] = [];
+    const shell = scenario.shell();
+
+    try {
+      const result = await runCodexCage(
+        { cwd, issueUrl: issue.url },
+        {
+          executionMode: "docker",
+          generateRunId: () => scenario.runId,
+          readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+          findCodexAuthFile: async () => null,
+          fetchIssueContext: async () => issue,
+          resolveTargetRepo: async () => repoResolution,
+          createAuthenticatedRepo: () => ({
+            repo,
+            cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+            redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          }),
+          createDockerSandbox: () => fakeSandbox(sandboxEvents),
+          createShellRunner: () => shell,
+          runIndependentReview: scenario.review ?? (async () => passingReview()),
+          publishSuccessfulRun:
+            scenario.publish ??
+            (async (input) => ({
+              branchName: input.branchName ?? "codex-cage/unused",
+              commitMessage: "unused",
+              prTitle: "unused",
+              prBody: "unused",
+              prUrl: "https://github.com/jhowliu/codex-cage/pull/unused",
+            })),
+        },
+      );
+
+      assert.equal(result.status, "failed");
+      assert.equal(result.failureCode, scenario.failureCode);
+
+      const eventPath = join(cwd, ".codex-cage", "runs", scenario.runId, "events.ndjson");
+      const eventText = await readFile(eventPath, "utf8");
+      const events = await readRunEvents(cwd, scenario.runId);
+      const replay = await replayRunEventJournal(eventPath);
+      const failedStage = replay.stages.at(-1);
+
+      assert.equal(replay.status, "failed");
+      assert.equal(replay.failureCode, scenario.failureCode);
+      assert.equal(failedStage?.stage, scenario.failedStage);
+      assert.equal(failedStage?.status, "failed");
+      assert.equal(failedStage?.failureCode, scenario.failureCode);
+      assert.ok(replay.stages.every((stage) => stage.status !== "running"));
+      assert.doesNotMatch(eventText, /token-value/);
+
+      if (scenario.failureCode === "review_blocking") {
+        assert.ok(
+          events.some(
+            (event) =>
+              event.type === "review.finished" && event.payload.decision === "blocking",
+          ),
+        );
+      }
+
+      if (scenario.failureCode === "secret_guard_failed") {
+        assert.ok(
+          events.some(
+            (event) =>
+              event.type === "verification.updated" &&
+              event.payload.kind === "secret_guard" &&
+              event.payload.status === "failed" &&
+              !event.payload.retryable,
+          ),
+        );
+      }
+
+      if (scenario.failureCode === "timeout") {
+        assert.ok(
+          events.some(
+            (event) =>
+              event.type === "command.finished" && event.payload.outcome === "timed_out",
+          ),
+        );
+      }
+
+      if (scenario.failureCode === "no_diff") {
+        assert.ok(!events.some((event) => event.type === "change.created"));
+      }
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+}

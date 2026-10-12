@@ -23,6 +23,7 @@ import { buildPromptContext } from "./prompt-context.js";
 import { createAuthenticatedRepo, resolveTargetRepo } from "./repo.js";
 import type { runIndependentReview } from "./review.js";
 import { RunFailureError } from "./run/errors.js";
+import type { RunEvent, RunEventSink } from "./run/events.js";
 import { openRunStore } from "./state.js";
 import type { createHostShellRunner, createHostWorkspace } from "./sandbox-execution.js";
 import {
@@ -33,11 +34,12 @@ import {
   type ShellRunner,
 } from "./run-workflow.js";
 
-export type { RunCodexCageResult, RunProgressEvent, ShellRunner };
+export type { RunCodexCageResult, RunEvent, RunEventSink, RunProgressEvent, ShellRunner };
 
 export type RunCommandOptions = {
   cwd?: string;
   issueUrl: string;
+  runId?: string | undefined;
   repo?: string | undefined;
   base?: string | undefined;
   model?: string | undefined;
@@ -65,6 +67,7 @@ export type RunCodexCageDependencies = {
   generateRunId?: () => string;
   findCodexAuthFile?: typeof findCodexAuthFile;
   onProgress?: (event: RunProgressEvent) => void;
+  onEvent?: RunEventSink;
   // Overrides mode resolution (env > config > docker). Tests pin this so they
   // are not influenced by an ambient CODEX_CAGE_EXECUTION.
   executionMode?: ExecutionMode;
@@ -112,6 +115,7 @@ export async function runCodexCage(
       ...(dependencies.onProgress === undefined
         ? {}
         : { onProgress: dependencies.onProgress }),
+      ...(dependencies.onEvent === undefined ? {} : { onEvent: dependencies.onEvent }),
     });
   } finally {
     store.close();
@@ -156,7 +160,7 @@ async function prepareRuntimeContext(
   const baseBranch = options.base ?? configResult.config.git.base;
   const model = options.model ?? configResult.config.agent.model;
   const draft = options.draft ?? configResult.config.pr.draft;
-  const runId = dependencies.generateRunId?.() ?? generateRunId();
+  const runId = options.runId ?? dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
   const runtimeImage = {
     image: configResult.config.runtime.image,

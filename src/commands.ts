@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
+import { createControlRoomServer } from "./control-room.js";
 import { doctorProject, type DoctorResult } from "./doctor.js";
 import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
@@ -87,6 +88,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
+    .option("--run-id <id>", "use a supplied Run identifier")
     .option(
       "--result-json <path>",
       `write the machine-readable run result to <path> (also settable via ${RESULT_FILE_ENV})`,
@@ -99,6 +101,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
       async (
         issueArgument: string | undefined,
         options: {
+          runId?: string;
           repo?: string;
           base?: string;
           model?: string;
@@ -122,6 +125,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           result = await run(
             removeUndefinedProperties({
               issueUrl,
+              runId: options.runId,
               repo: options.repo,
               base: options.base,
               model: options.model,
@@ -172,6 +176,21 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         }
       },
     );
+
+  program
+    .command("control-room")
+    .description("Start the local Codex Cage Control Room.")
+    .option("--host <host>", "bind address", "127.0.0.1")
+    .option("--port <port>", "listen port", parsePort)
+    .action(async (options: { host: string; port?: number }) => {
+      const controlRoom = await createControlRoomServer({
+        cwd: process.cwd(),
+        host: options.host,
+        ...(options.port === undefined ? {} : { port: options.port }),
+      });
+      console.log(`Control Room: ${controlRoom.url}`);
+      await waitForShutdown(controlRoom.close);
+    });
 
   const runs = program.command("runs").description("Inspect prior Codex Cage runs.");
 
@@ -284,6 +303,27 @@ function parseOnOff(value: string): boolean {
     default:
       throw new Error('--actions must be "on" or "off".');
   }
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new Error("--port must be an integer between 0 and 65535.");
+  }
+  return port;
+}
+
+async function waitForShutdown(close: () => Promise<void>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let stopping = false;
+    const shutdown = (): void => {
+      if (stopping) return;
+      stopping = true;
+      void close().then(resolve, reject);
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
 }
 
 function printSetupResult(result: SetupResult, color: Colorizer): void {
