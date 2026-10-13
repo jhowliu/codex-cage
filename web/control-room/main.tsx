@@ -10,13 +10,16 @@ import {
   type Run,
   type Snapshot,
 } from "./types";
-import { fetchJson, isGithubIssueUrl, pageFromHash } from "./utils";
+import { fetchJson, isGithubIssueUrl, pageFromHash, runIdFromHash } from "./utils";
 import "@fontsource-variable/inter";
 import "./styles.css";
 
 function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [page, setPage] = useState<PageName>(() => pageFromHash());
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(() =>
+    runIdFromHash(),
+  );
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [repositorySearch, setRepositorySearch] = useState("");
   const [repositoryPath, setRepositoryPath] = useState("");
@@ -35,12 +38,16 @@ function App(): JSX.Element {
   const selectedRepository =
     snapshot.repositories.find((repository) => repository.id === selectedRepositoryId) ??
     snapshot.repositories[0];
+  const selectedRun = snapshot.runs.find((run) => run.id === selectedRunId);
   const activeRuns = snapshot.runs.filter(
     (run) => run.status === "queued" || run.status === "running",
   ).length;
 
   useEffect(() => {
-    const syncPage = (): void => setPage(pageFromHash());
+    const syncPage = (): void => {
+      setPage(pageFromHash());
+      setSelectedRunId(runIdFromHash());
+    };
     window.addEventListener("hashchange", syncPage);
     return () => window.removeEventListener("hashchange", syncPage);
   }, []);
@@ -224,7 +231,17 @@ function App(): JSX.Element {
           onAddRepository={openRepositoryModal}
         />
       ) : (
-        <RunsPage runs={snapshot.runs} onCreateTask={openTaskModal} />
+        <RunsPage
+          runs={snapshot.runs}
+          selectedRun={selectedRun}
+          onCreateTask={openTaskModal}
+          onSelectRun={(runId) => {
+            window.location.hash = `runs/${encodeURIComponent(runId)}`;
+          }}
+          onBack={() => {
+            window.location.hash = "runs";
+          }}
+        />
       )}
     </AppShell>
   );

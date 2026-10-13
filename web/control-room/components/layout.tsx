@@ -46,7 +46,6 @@ export function AppShell({
             icon="repo"
             active={page === "repositories"}
           />
-          <NavLink href="#evidence" label="Evidence" icon="archive" />
         </nav>
         <div className="mt-auto grid gap-[23px] max-md:hidden">
           <div className="flex items-start gap-[9px] rounded-[10px] border border-[#e6ebf2] bg-[#fbfdfc] p-[13px_11px] text-green">
@@ -119,7 +118,7 @@ function NavLink({
 }: {
   href: string;
   label: string;
-  icon: "archive" | "repo" | "runs";
+  icon: "repo" | "runs";
   active?: boolean;
   count?: number;
 }): JSX.Element {

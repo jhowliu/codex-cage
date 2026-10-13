@@ -1,23 +1,53 @@
 import { useMemo, useState } from "react";
 import type { Repository, Run } from "../types";
 import { formatTime, issueNumber } from "../utils";
+import { RunDetails } from "./run-details";
 import {
   EmptyState,
   Icon,
   panelClass,
   primaryButtonClass,
   repositoryStatusClass,
+  secondaryButtonClass,
   statusPillClass,
   taskIconClass,
 } from "./ui";
 
 export function RunsPage({
   runs,
+  selectedRun,
   onCreateTask,
+  onSelectRun,
+  onBack,
 }: {
   runs: Run[];
+  selectedRun: Run | undefined;
   onCreateTask: () => void;
+  onSelectRun: (runId: string) => void;
+  onBack: () => void;
 }): JSX.Element {
+  if (selectedRun !== undefined) {
+    return (
+      <>
+        <PageHeading
+          title="Run details"
+          copy={`${selectedRun.repositoryName} · ${issueNumber(selectedRun.issueUrl)}`}
+          action={
+            <button
+              className={`${secondaryButtonClass} max-sm:mt-[18px] max-sm:w-full`}
+              type="button"
+              onClick={onBack}
+            >
+              <Icon name="chevron-right" size={15} className="rotate-180" />
+              Back to runs
+            </button>
+          }
+        />
+        <RunDetails key={selectedRun.id} run={selectedRun} />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeading
@@ -55,7 +85,7 @@ export function RunsPage({
           ) : (
             <div className="grid gap-[3px]">
               {runs.map((run) => (
-                <TaskRow key={run.id} run={run} />
+                <TaskRow key={run.id} run={run} onSelect={onSelectRun} />
               ))}
             </div>
           )}
@@ -296,9 +326,20 @@ function PageHeading({
   );
 }
 
-function TaskRow({ run }: { run: Run }): JSX.Element {
+function TaskRow({
+  run,
+  onSelect,
+}: {
+  run: Run;
+  onSelect: (runId: string) => void;
+}): JSX.Element {
   return (
-    <div className="grid min-h-[70px] w-full grid-cols-[31px_minmax(190px,1.5fr)_minmax(74px,0.65fr)_88px_55px] items-center gap-3 rounded-[9px] border border-transparent bg-transparent px-3 py-[9px] text-left max-md:grid-cols-[34px_minmax(0,1fr)_78px_88px] max-sm:min-h-[66px] max-sm:grid-cols-[34px_minmax(0,1fr)_88px] max-sm:gap-[9px] max-sm:px-[7px]">
+    <button
+      className="grid min-h-[70px] w-full grid-cols-[31px_minmax(190px,1.5fr)_minmax(74px,0.65fr)_88px_55px] items-center gap-3 rounded-[9px] border border-transparent bg-transparent px-3 py-[9px] text-left transition hover:border-[#d8e2f3] hover:bg-[#f8faff] max-md:grid-cols-[34px_minmax(0,1fr)_78px_88px] max-sm:min-h-[66px] max-sm:grid-cols-[34px_minmax(0,1fr)_88px] max-sm:gap-[9px] max-sm:px-[7px]"
+      type="button"
+      onClick={() => onSelect(run.id)}
+      aria-label={`Open details for ${issueNumber(run.issueUrl)}`}
+    >
       <span
         className={`grid size-[31px] place-items-center rounded-[9px] ${taskIconClass(run.status)}`}
         aria-hidden="true"
@@ -332,6 +373,6 @@ function TaskRow({ run }: { run: Run }): JSX.Element {
       <span className="overflow-hidden text-right font-mono text-[9px] text-soft-muted max-md:hidden">
         {formatTime(run.updatedAt)}
       </span>
-    </div>
+    </button>
   );
 }
