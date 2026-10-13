@@ -1,6 +1,6 @@
 import type { FormEvent, RefObject } from "react";
 import type { Repository } from "../types";
-import { issueNumber } from "../utils";
+import { issueNumber, normalizeGithubIssueUrl } from "../utils";
 import {
   Icon,
   ModalIntro,
@@ -98,10 +98,14 @@ export function TaskModal({
             />
           )}
           {step === 2 && (
-            <IssueStep issueUrl={issueUrl} onIssueUrlChange={onIssueUrlChange} />
+            <IssueStep
+              issueUrl={issueUrl}
+              error={error}
+              onIssueUrlChange={onIssueUrlChange}
+            />
           )}
           {step === 3 && <ReviewStep repository={repository} issueUrl={issueUrl} />}
-          {error !== "" && (
+          {error !== "" && step !== 2 && (
             <div
               className="mt-[14px] flex items-start gap-2 rounded-lg bg-red-soft p-[10px_12px] text-[10px] text-red"
               role="alert"
@@ -369,9 +373,11 @@ function RepositoryStep({
 
 function IssueStep({
   issueUrl,
+  error,
   onIssueUrlChange,
 }: {
   issueUrl: string;
+  error: string;
   onIssueUrlChange: (value: string) => void;
 }): JSX.Element {
   return (
@@ -389,11 +395,27 @@ function IssueStep({
       <input
         className="min-h-[50px] w-full rounded-xl border border-[#cfd8e6] bg-[#fbfcfe] px-4 text-[14px] text-ink outline-none placeholder:text-[#adb6c3] focus:border-[#88aefc] focus:ring-4 focus:ring-[#dfeaff]"
         id="modal-issue-url"
+        type="url"
+        inputMode="url"
+        autoComplete="url"
         value={issueUrl}
         onChange={(event) => onIssueUrlChange(event.target.value)}
+        onBlur={() => onIssueUrlChange(normalizeGithubIssueUrl(issueUrl))}
         placeholder="https://github.com/org/repo/issues/123"
+        aria-invalid={error !== ""}
+        aria-describedby={error !== "" ? "modal-issue-url-error" : undefined}
         autoFocus
       />
+      {error !== "" && (
+        <div
+          className="mt-2 flex items-start gap-2 text-[11px] leading-[1.45] text-red"
+          id="modal-issue-url-error"
+          role="alert"
+        >
+          <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
       <div className="mt-5 flex items-start gap-3 rounded-xl bg-[#f3f7ff] p-3 text-[12px] text-[#55709e]">
         <Icon name="shield" size={18} />
         <span>

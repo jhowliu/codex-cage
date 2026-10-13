@@ -137,40 +137,53 @@ function StageStepper({
   selectedStage: Stage;
   onSelect: (stage: Stage) => void;
 }): JSX.Element {
+  const selectedIndex = stages.indexOf(selectedStage);
+
   return (
-    <div className="grid grid-cols-5 gap-2 max-sm:grid-cols-1 max-sm:gap-1.5">
+    <ol
+      className="relative grid grid-cols-5 gap-2 max-sm:grid-cols-1 max-sm:gap-1.5"
+      aria-label="Run stages"
+    >
       {stages.map((stage, index) => {
         const status = getStageStatus(run, stage);
         const selected = stage === selectedStage;
         return (
-          <button
-            className={`relative grid min-h-[88px] content-center justify-items-center gap-2 rounded-[10px] border px-2 py-3 text-center transition max-sm:min-h-[56px] max-sm:grid-cols-[38px_minmax(0,1fr)_auto] max-sm:justify-items-start max-sm:gap-2.5 max-sm:px-3 ${selected ? "border-[#a9c4ff] bg-[#f0f5ff] text-blue shadow-[0_4px_12px_rgb(40_87_175_/_6%)]" : "border-[#e3e8f0] bg-white text-[#7788a7] hover:border-[#cbdafa] hover:bg-[#f8faff]"}`}
-            type="button"
-            aria-current={selected ? "step" : undefined}
-            aria-label={`${stageLabels[stage]}, ${stageStatusLabel(status)}${selected ? ", selected" : ""}`}
-            onClick={() => onSelect(stage)}
-          >
-            <span
-              className={`grid size-[30px] place-items-center rounded-full border font-mono text-[11px] font-bold ${stageMarkerClass(status, selected)}`}
+          <li className="relative min-w-0">
+            {index < stages.length - 1 && (
+              <span
+                className={`absolute left-1/2 top-[23px] hidden h-px w-[calc(100%+8px)] max-sm:hidden sm:block ${index < selectedIndex && status === "succeeded" ? "bg-[#6e9bea]" : "bg-[#c8d7eb]"}`}
+                aria-hidden="true"
+              />
+            )}
+            <button
+              className={`group relative z-[1] grid min-h-[88px] w-full justify-items-center gap-2 rounded-[10px] border border-transparent bg-transparent px-2 py-3 text-center transition hover:bg-[#fbfcff] max-sm:min-h-[56px] max-sm:grid-cols-[38px_minmax(0,1fr)_auto] max-sm:justify-items-start max-sm:gap-2.5 max-sm:px-3 ${selected ? "text-blue" : "text-[#7788a7]"}`}
+              type="button"
+              aria-current={selected ? "step" : undefined}
+              aria-label={`${stageLabels[stage]}, ${stageStatusLabel(status)}${selected ? ", selected" : ""}`}
+              onClick={() => onSelect(stage)}
             >
-              {status === "succeeded" ? (
-                <Icon name="check" size={15} />
-              ) : status === "failed" ? (
-                <Icon name="alert" size={15} />
-              ) : (
-                index + 1
-              )}
-            </span>
-            <strong className="text-[11px] font-bold max-sm:justify-self-start">
-              {stageLabels[stage]}
-            </strong>
-            <span className="font-mono text-[8px] uppercase tracking-[0.05em] opacity-80 max-sm:ml-auto">
-              {stageStatusLabel(status)}
-            </span>
-          </button>
+              <span
+                className={`grid size-[44px] place-items-center rounded-full border-2 font-mono text-[16px] font-bold transition max-sm:size-[38px] max-sm:text-[14px] ${stageMarkerClass(status, selected)}`}
+              >
+                {status === "succeeded" ? (
+                  <Icon name="check" size={18} />
+                ) : status === "failed" ? (
+                  <Icon name="alert" size={17} />
+                ) : (
+                  index + 1
+                )}
+              </span>
+              <strong className="text-[11px] font-bold max-sm:justify-self-start">
+                {stageLabels[stage]}
+              </strong>
+              <span className="font-mono text-[8px] uppercase tracking-[0.05em] opacity-80 max-sm:ml-auto">
+                {stageStatusLabel(status)}
+              </span>
+            </button>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 }
 
@@ -410,12 +423,18 @@ function stageStatusLabel(status: StageViewStatus): string {
 }
 
 function stageMarkerClass(status: StageViewStatus, selected: boolean): string {
-  if (status === "succeeded") return "border-green bg-green-soft text-green";
+  if (selected && status === "failed") {
+    return "border-red bg-red text-white shadow-[0_0_0_5px_#fff0f1]";
+  }
+  if (selected) {
+    return "border-blue bg-blue text-white shadow-[0_0_0_5px_#e8f0ff]";
+  }
+  if (status === "succeeded") return "border-[#7da5ef] bg-blue text-white";
   if (status === "failed") return "border-red bg-red-soft text-red";
-  if (status === "running") return "border-blue bg-blue-soft text-blue";
-  return selected
-    ? "border-[#a9c4ff] bg-white text-blue"
-    : "border-[#dbe3ef] bg-[#fbfcff] text-[#8292ad]";
+  if (status === "running") {
+    return "border-blue bg-blue-soft text-blue";
+  }
+  return "border-[#dbe3ef] bg-[#fbfcff] text-[#8292ad]";
 }
 
 function stagePillClass(status: StageViewStatus): string {

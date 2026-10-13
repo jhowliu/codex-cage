@@ -10,7 +10,13 @@ import {
   type Run,
   type Snapshot,
 } from "./types";
-import { fetchJson, isGithubIssueUrl, pageFromHash, runIdFromHash } from "./utils";
+import {
+  fetchJson,
+  isGithubIssueUrl,
+  normalizeGithubIssueUrl,
+  pageFromHash,
+  runIdFromHash,
+} from "./utils";
 import "@fontsource-variable/inter";
 import "./styles.css";
 
@@ -110,11 +116,15 @@ function App(): JSX.Element {
       setFormError("Choose a ready repository before continuing.");
       return;
     }
-    if (taskStep === 2 && !isGithubIssueUrl(issueUrl)) {
-      setFormError(
-        "Enter a GitHub Issue URL, for example https://github.com/org/repo/issues/123.",
-      );
-      return;
+    if (taskStep === 2) {
+      const normalizedIssueUrl = normalizeGithubIssueUrl(issueUrl);
+      if (normalizedIssueUrl !== issueUrl) setIssueUrl(normalizedIssueUrl);
+      if (!isGithubIssueUrl(normalizedIssueUrl)) {
+        setFormError(
+          "Enter a secure GitHub Issue URL, for example https://github.com/org/repo/issues/123.",
+        );
+        return;
+      }
     }
     setFormError("");
     setTaskStep((step) => Math.min(3, step + 1));
@@ -144,11 +154,15 @@ function App(): JSX.Element {
   }
 
   async function createRun(): Promise<void> {
-    if (selectedRepositoryId === "" || !isGithubIssueUrl(issueUrl)) return;
+    const normalizedIssueUrl = normalizeGithubIssueUrl(issueUrl);
+    if (selectedRepositoryId === "" || !isGithubIssueUrl(normalizedIssueUrl)) return;
     await runAction(async () => {
       const run = await fetchJson<Run>("/api/runs", {
         method: "POST",
-        body: JSON.stringify({ repositoryId: selectedRepositoryId, issueUrl }),
+        body: JSON.stringify({
+          repositoryId: selectedRepositoryId,
+          issueUrl: normalizedIssueUrl,
+        }),
       });
       setIssueUrl("");
       setTaskModalOpen(false);

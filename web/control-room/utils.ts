@@ -26,6 +26,11 @@ export function isGithubIssueUrl(value: string): boolean {
   return /^https:\/\/github\.com\/[^/]+\/[^/]+\/issues\/\d+\/?$/.test(value.trim());
 }
 
+export function normalizeGithubIssueUrl(value: string): string {
+  const trimmed = value.trim();
+  return trimmed.replace(/^http:\/\/(github\.com\/)/i, "https://$1");
+}
+
 export function formatTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     hour: "2-digit",
