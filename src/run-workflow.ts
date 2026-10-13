@@ -16,11 +16,13 @@ import {
   type RuntimeImageBuildResult,
 } from "./docker.js";
 import type { IssueContext } from "./issue.js";
+import { scanDiffForGuardViolations } from "./guards.js";
 import { NoDiffError, publishSuccessfulRun } from "./publish.js";
 import type { PromptContext } from "./prompt-context.js";
 import type { AuthenticatedRepo, RepoResolution } from "./repo.js";
 import { runIndependentReview, ReviewModifiedDiffError } from "./review.js";
 import { RunFailureError } from "./run/errors.js";
+import type { RunEventSink } from "./run/events.js";
 import {
   runPublishGate,
   runReviewGate,
@@ -41,6 +43,7 @@ import {
   shellQuote,
   type HostWorkspace,
   type ShellRunner,
+  type ShellTimeouts,
   type StreamSink,
 } from "./sandbox-execution.js";
 import type { FailureCode, PhaseName, RunStore } from "./state.js";
@@ -112,6 +115,7 @@ export type RunWorkflowInput = {
     sandbox: DockerSandbox,
     env: Record<string, string>,
     sink?: StreamSink,
+    timeouts?: ShellTimeouts,
   ) => ShellRunner;
   createHostWorkspace?: typeof createHostWorkspace;
   createHostShellRunner?: typeof createHostShellRunner;
@@ -119,6 +123,7 @@ export type RunWorkflowInput = {
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
   onProgress?: (event: RunProgressEvent) => void;
+  onEvent?: RunEventSink;
 };
 
 export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCageResult> {
@@ -132,13 +137,18 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
   const review = input.runIndependentReview ?? runIndependentReview;
   const publish = input.publishSuccessfulRun ?? publishSuccessfulRun;
   const onProgress = input.onProgress ?? (() => undefined);
-  const journal = new RunJournal(input.store, context, onProgress);
+  const journal = new RunJournal(input.store, context, onProgress, input.onEvent);
   const redactor = context.credentials.redactor();
   // In verbose mode, stream redacted command output to stdout so progress is
   // visible live (locally and, crucially, in CI logs where files are not).
   const streamSink = context.verbose
     ? createLineStreamSink((line) => process.stdout.write(line), redactor)
     : undefined;
+  const shellTimeouts: ShellTimeouts = {
+    commandMs: context.config.timeouts.command_minutes * 60_000,
+    idleMs: context.config.timeouts.idle_minutes * 60_000,
+    deadlineAt: Date.now() + context.config.timeouts.total_minutes * 60_000,
+  };
   let sandbox: DockerSandbox | null = null;
   let shell: ShellRunner | null = null;
   let compose: ComposeProject | null = null;
@@ -146,12 +156,14 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
 
   try {
     await journal.startRun();
+    await journal.startStage("prepare");
     await journal.writeJsonArtifact("issue.json", context.issue);
     await journal.writePromptContextArtifact();
     await journal.writeJsonArtifact("resolved-config.json", {
       config: context.config,
       warnings: context.configWarnings,
       repoSource: context.repoResolution.source,
+      executionMode: context.executionMode,
       runtimeImage: context.runtimeImage,
     });
 
@@ -172,6 +184,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
         sink: streamSink,
         createHostWorkspace: makeHostWorkspace,
         createHostShellRunner: makeHostShellRunner,
+        shellTimeouts,
         registerWorkspace: (workspace) => {
           hostWorkspace = workspace;
         },
@@ -186,6 +199,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
         buildImage,
         makeShellRunner,
         makeComposeProject,
+        shellTimeouts,
         registerCompose: (project) => {
           compose = project;
         },
@@ -216,9 +230,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
           return logs.join("\n");
         });
       } catch (error) {
+        if (error instanceof RunFailureError) throw error;
         throw new RunFailureError("setup_failed", formatError(error));
       }
     }
+
+    await journal.finishStage();
 
     const runResult = await runImplementationLoop({
       context,
@@ -229,16 +246,22 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
       publish,
     });
 
-    onProgress({
-      type: "run_finished",
-      runId: runResult.runId,
-      status: runResult.status,
-      failureCode: runResult.failureCode,
-      prUrl: runResult.prUrl,
-    });
     return runResult;
   } catch (error) {
     const failureCode = failureCodeFromError(error);
+    if (shell !== null) {
+      try {
+        const failedDiff = await readCurrentDiff(shell);
+        const violations = scanDiffForGuardViolations(failedDiff, {
+          injectedSecrets: context.credentials.injectedSecrets(),
+        });
+        if (failedDiff.trim() !== "" && violations.length === 0) {
+          await journal.writeArtifact("final.patch", redactor(failedDiff));
+        }
+      } catch {
+        // Failure reporting must not hide the original run failure.
+      }
+    }
     await journal.recordFailure(failureCode, error);
 
     const runResult: RunCodexCageResult = {
@@ -247,11 +270,6 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
       failureCode,
       prUrl: null,
     };
-
-    onProgress({
-      type: "run_finished",
-      ...runResult,
-    });
 
     return runResult;
   } finally {
@@ -270,10 +288,12 @@ async function provisionDockerSandbox(input: {
     sandbox: DockerSandbox,
     env: Record<string, string>,
     sink?: StreamSink,
+    timeouts?: ShellTimeouts,
   ) => ShellRunner;
   makeComposeProject: typeof createComposeProject;
   registerCompose: (project: ComposeProject) => void;
   registerSandbox: (sandbox: DockerSandbox) => void;
+  shellTimeouts: ShellTimeouts;
 }): Promise<ShellRunner> {
   const { context, journal, redactor } = input;
   const runtimeDockerfile = context.config.runtime.dockerfile;
@@ -344,7 +364,9 @@ async function provisionDockerSandbox(input: {
 
   const sandbox = input.createSandbox(sandboxOptions);
   input.registerSandbox(sandbox);
-  const shell = input.makeShellRunner(sandbox, {}, input.sink);
+  const shell = journal.instrumentShell(
+    input.makeShellRunner(sandbox, {}, input.sink, input.shellTimeouts),
+  );
 
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {
@@ -371,6 +393,7 @@ async function provisionDirectWorkspace(input: {
   createHostWorkspace: typeof createHostWorkspace;
   createHostShellRunner: typeof createHostShellRunner;
   registerWorkspace: (workspace: HostWorkspace) => void;
+  shellTimeouts: ShellTimeouts;
 }): Promise<ShellRunner> {
   const { context, journal, redactor } = input;
 
@@ -379,7 +402,14 @@ async function provisionDirectWorkspace(input: {
   const cloneCredentials = runtimeCommandCredentials("clone", context);
   const workspace = await input.createHostWorkspace(context.runId);
   input.registerWorkspace(workspace);
-  const shell = input.createHostShellRunner(workspace.workspacePath, {}, input.sink);
+  const shell = journal.instrumentShell(
+    input.createHostShellRunner(
+      workspace.workspacePath,
+      {},
+      input.sink,
+      input.shellTimeouts,
+    ),
+  );
 
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {
@@ -430,8 +460,12 @@ async function runImplementationLoop(input: {
     iteration <= input.context.config.agent.max_iterations;
     iteration += 1
   ) {
-    input.journal.iterationStarted(iteration, input.context.config.agent.max_iterations);
     await input.journal.setRunStatus("implementing");
+    await input.journal.startStage("implement");
+    await input.journal.iterationStarted(
+      iteration,
+      input.context.config.agent.max_iterations,
+    );
     await input.journal.runPhase("implement", async () => {
       const prompt = buildImplementationPrompt({
         context: input.context,
@@ -455,8 +489,10 @@ async function runImplementationLoop(input: {
         runtimeCommandCredentials("implement", input.context),
       );
     });
+    await input.journal.finishStage();
 
     await input.journal.setRunStatus("verifying");
+    await input.journal.startStage("verify");
     const verification = await runVerificationCommands({
       journal: input.journal,
       shell: input.shell,
@@ -468,23 +504,47 @@ async function runImplementationLoop(input: {
     if (!verification.passed) {
       lastFailure = "verify_failed";
       feedback.push(verification.feedback);
+      if (iteration === input.context.config.agent.max_iterations) {
+        throw maxIterationsError(lastFailure);
+      }
+      await input.journal.failStage("verify_failed");
       continue;
     }
 
     const diff = await readCurrentDiff(input.shell);
-    const secretGuard = runSecretGuardGate({
-      context: input.context,
-      diff,
-      guardAttempt,
-    });
+    let secretGuard: ReturnType<typeof runSecretGuardGate>;
+    try {
+      secretGuard = runSecretGuardGate({
+        context: input.context,
+        diff,
+        guardAttempt,
+      });
+    } catch (error) {
+      if (
+        error instanceof RunFailureError &&
+        error.failureCode === "secret_guard_failed"
+      ) {
+        await input.journal.recordSecretGuard({ status: "failed", retryable: false });
+      }
+      throw error;
+    }
 
     if (secretGuard.action === "retry") {
+      await input.journal.recordSecretGuard({ status: "failed", retryable: true });
       guardAttempt = secretGuard.guardAttempt;
       lastFailure = secretGuard.lastFailure;
       feedback.push(secretGuard.feedback);
+      if (iteration === input.context.config.agent.max_iterations) {
+        throw maxIterationsError(lastFailure);
+      }
+      await input.journal.failStage("secret_guard_failed");
       continue;
     }
 
+    await input.journal.recordSecretGuard({ status: "passed", retryable: false });
+    await input.journal.finishStage();
+
+    await input.journal.startStage("review");
     const reviewAction = await runReviewGate({
       context: input.context,
       journal: input.journal,
@@ -503,6 +563,10 @@ async function runImplementationLoop(input: {
       feedback.push(
         `Independent review found blocking issues:\n${reviewAction.feedback}`,
       );
+      if (iteration === input.context.config.agent.max_iterations) {
+        throw maxIterationsError(lastFailure);
+      }
+      await input.journal.failStage("review_blocking");
       continue;
     }
 
@@ -510,6 +574,9 @@ async function runImplementationLoop(input: {
       throw new RunFailureError("review_blocking", reviewAction.feedback);
     }
 
+    await input.journal.finishStage();
+
+    await input.journal.startStage("publish");
     const publishResult = await runPublishGate({
       context: input.context,
       journal: input.journal,
@@ -518,6 +585,7 @@ async function runImplementationLoop(input: {
       publish: input.publish,
       verification,
     });
+    await input.journal.recordSuccess(publishResult);
 
     return {
       runId: input.context.runId,
@@ -527,7 +595,11 @@ async function runImplementationLoop(input: {
     };
   }
 
-  throw new RunFailureError(lastFailure, `Exceeded max_iterations without success.`);
+  throw maxIterationsError(lastFailure);
+}
+
+function maxIterationsError(failureCode: FailureCode): RunFailureError {
+  return new RunFailureError(failureCode, "Exceeded max_iterations without success.");
 }
 
 async function runVerificationCommands(input: {
@@ -542,16 +614,46 @@ async function runVerificationCommands(input: {
   const logs: string[] = [];
 
   for (const command of input.commands) {
-    const result = await input.shell.run(command, input.commandOptions);
+    let result: Awaited<ReturnType<ShellRunner["run"]>>;
+    try {
+      result = await input.shell.run(command, input.commandOptions);
+    } catch (error) {
+      await phase.fail(formatError(error));
+      await input.journal.recordVerificationCommands({
+        status: "failed",
+        commandCount: input.commands.length,
+        passedCount: items.length,
+        logRef: phase.logPath,
+      });
+      throw error;
+    }
+
     const log = formatCommandLog(command, result);
     logs.push(log);
+    if (result.exitCode === 124) {
+      const redactedLog = input.redactor(logs.join("\n"));
+      await phase.fail(redactedLog);
+      await input.journal.recordVerificationCommands({
+        status: "failed",
+        commandCount: input.commands.length,
+        passedCount: items.length,
+        logRef: phase.logPath,
+      });
+      throw new RunFailureError("timeout", redactedLog);
+    }
 
     if (result.exitCode !== 0) {
       const redactedLog = input.redactor(logs.join("\n"));
       await phase.fail(redactedLog);
+      await input.journal.recordVerificationCommands({
+        status: "failed",
+        commandCount: input.commands.length,
+        passedCount: items.length,
+        logRef: phase.logPath,
+      });
       return {
         passed: false,
-        feedback: `Verification failed for command: ${command}\n${redactedLog}`,
+        feedback: `Verification failed for command: ${input.redactor(command)}\n${redactedLog}`,
       };
     }
 
@@ -560,6 +662,12 @@ async function runVerificationCommands(input: {
 
   const summary = input.redactor(logs.join("\n"));
   await phase.pass(summary);
+  await input.journal.recordVerificationCommands({
+    status: "passed",
+    commandCount: input.commands.length,
+    passedCount: items.length,
+    logRef: phase.logPath,
+  });
 
   return {
     passed: true,

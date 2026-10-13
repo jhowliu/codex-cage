@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCli } from "../src/commands.js";
 import type { RunCommandOptions, RunCodexCageResult } from "../src/run.js";
+import { RunFailureError } from "../src/run/errors.js";
 import { openRunStore } from "../src/state.js";
 
 async function runCliInProcess(
@@ -60,15 +61,18 @@ test("root help lists commands", () => {
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Usage: codex-cage/);
-  assert.match(result.stdout, /\binit\b/);
+  assert.match(result.stdout, /\bsetup\b/);
+  assert.match(result.stdout, /\bdoctor\b/);
   assert.match(result.stdout, /\brun\b/);
   assert.match(result.stdout, /\bruns\b/);
   assert.match(result.stdout, /\bcleanup\b/);
+  assert.doesNotMatch(result.stdout, /\binit\b/);
 });
 
 test("command help is available for commands", () => {
   const commands = [
-    ["init", "--help"],
+    ["setup", "--help"],
+    ["doctor", "--help"],
     ["run", "--help"],
     ["runs", "list", "--help"],
     ["runs", "show", "--help"],
@@ -122,43 +126,6 @@ test("run accepts a positional issue URL", async () => {
     {
       issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
       repo: "jhowliu/codex-cage",
-    },
-  ]);
-});
-
-test("run keeps the --issue option for compatibility", async () => {
-  const calls: RunCommandOptions[] = [];
-  const originalConsoleLog = console.log;
-  const originalExitCode = process.exitCode;
-  const program = createCli({
-    runCodexCage: async (input): Promise<RunCodexCageResult> => {
-      calls.push(input);
-      return {
-        runId: "run-cli-test",
-        status: "failed",
-        failureCode: null,
-        prUrl: null,
-      };
-    },
-  });
-
-  program.exitOverride();
-  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
-  console.log = () => undefined;
-
-  try {
-    await program.parseAsync(
-      ["run", "--issue", "https://github.com/jhowliu/codex-cage/issues/35"],
-      { from: "user" },
-    );
-  } finally {
-    console.log = originalConsoleLog;
-    process.exitCode = originalExitCode;
-  }
-
-  assert.deepEqual(calls, [
-    {
-      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
     },
   ]);
 });
@@ -245,6 +212,45 @@ test("run reads the result file path from the environment", async () => {
     } else {
       process.env.CODEX_CAGE_RESULT_FILE = previous;
     }
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run writes a result file for preflight failures", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const resultPath = join(cwd, "preflight-result.json");
+  const originalConsoleError = console.error;
+  const originalExitCode = process.exitCode;
+  process.exitCode = 0;
+  console.error = () => undefined;
+  const program = createCli({
+    runCodexCage: async () => {
+      throw new RunFailureError("missing_config", ".codex-cage.yml was not found.");
+    },
+  });
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+
+  try {
+    await program.parseAsync(
+      [
+        "run",
+        "https://github.com/jhowliu/codex-cage/issues/10",
+        "--result-json",
+        resultPath,
+      ],
+      { from: "user" },
+    );
+    assert.equal(process.exitCode, 1);
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), {
+      runId: "unstarted",
+      status: "failed",
+      failureCode: "missing_config",
+      prUrl: null,
+    });
+  } finally {
+    console.error = originalConsoleError;
+    process.exitCode = originalExitCode;
     await rm(cwd, { recursive: true, force: true });
   }
 });

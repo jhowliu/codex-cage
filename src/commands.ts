@@ -2,8 +2,11 @@ import { Command } from "commander";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
-import { initProject } from "./init.js";
+import { createControlRoomServer } from "./control-room.js";
+import { doctorProject, type DoctorResult } from "./doctor.js";
 import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
+import { RunFailureError } from "./run/errors.js";
+import { setupProject, type SetupResult } from "./setup.js";
 import { openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
@@ -12,11 +15,15 @@ export const VERBOSE_ENV = "CODEX_CAGE_VERBOSE";
 
 export type CliDependencies = {
   runCodexCage?: typeof runCodexCage;
+  setupProject?: typeof setupProject;
+  doctorProject?: typeof doctorProject;
 };
 
 export function createCli(dependencies: CliDependencies = {}): Command {
   const program = new Command();
   const run = dependencies.runCodexCage ?? runCodexCage;
+  const setup = dependencies.setupProject ?? setupProject;
+  const doctor = dependencies.doctorProject ?? doctorProject;
 
   program
     .name("codex-cage")
@@ -26,31 +33,62 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .version(readPackageVersion());
 
   program
-    .command("init")
-    .description("Create Codex Cage config files in the current repository.")
-    .option("--dockerfile", "also create .codex-cage/Dockerfile")
-    .action(async (options: { dockerfile?: boolean }) => {
-      const result = await initProject(process.cwd(), options);
-      const color = createColorizer(process.stdout);
+    .command("setup")
+    .description("Configure local Docker runs and optional GitHub Actions automation.")
+    .option("--yes", "accept detected defaults without prompting")
+    .option("--dry-run", "show planned file changes without writing them")
+    .option(
+      "--actions <enabled>",
+      "set GitHub Actions automation to on or off",
+      parseOnOff,
+    )
+    .option("--github", "create GitHub labels and configure missing Actions secrets")
+    .action(
+      async (options: {
+        yes?: boolean;
+        dryRun?: boolean;
+        actions?: boolean;
+        github?: boolean;
+      }) => {
+        const result = await setup(process.cwd(), {
+          ...(options.yes === undefined ? {} : { yes: options.yes }),
+          ...(options.dryRun === undefined ? {} : { dryRun: options.dryRun }),
+          ...(options.actions === undefined ? {} : { actions: options.actions }),
+          ...(options.github === undefined ? {} : { github: options.github }),
+        });
+        const color = createColorizer(process.stdout);
+        printSetupResult(result, color);
+        if (!result.dryRun) {
+          const diagnostics = await doctor(process.cwd());
+          printDoctorResult(diagnostics, color);
+          if (!diagnostics.healthy) process.exitCode = 1;
+        }
+      },
+    );
 
-      for (const path of result.created) {
-        console.log(`${color.success("created")} ${color.info(path)}`);
+  program
+    .command("doctor")
+    .description("Check local and GitHub Actions Codex Cage configuration.")
+    .option("--json", "print the machine-readable diagnostic result")
+    .action(async (options: { json?: boolean }) => {
+      const result = await doctor(process.cwd());
+      if (options.json === true) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        printDoctorResult(result, createColorizer(process.stdout));
       }
-
-      for (const path of result.updated) {
-        console.log(`${color.warning("updated")} ${color.info(path)}`);
-      }
+      if (!result.healthy) process.exitCode = 1;
     });
 
   program
     .command("run")
     .description("Run Codex Cage for a GitHub or Linear issue URL.")
-    .argument("[issue-url]", "GitHub or Linear issue URL")
-    .option("--issue <url>", "GitHub or Linear issue URL")
+    .argument("<issue-url>", "GitHub or Linear issue URL")
     .option("--repo <repo>", "target GitHub repository override")
     .option("--base <branch>", "base branch override")
     .option("--model <model>", "Codex model override")
     .option("--draft", "create a draft pull request")
+    .option("--run-id <id>", "use a supplied Run identifier")
     .option(
       "--result-json <path>",
       `write the machine-readable run result to <path> (also settable via ${RESULT_FILE_ENV})`,
@@ -63,7 +101,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
       async (
         issueArgument: string | undefined,
         options: {
-          issue?: string;
+          runId?: string;
           repo?: string;
           base?: string;
           model?: string;
@@ -73,7 +111,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         },
         command: Command,
       ) => {
-        const issueUrl = options.issue ?? issueArgument;
+        const issueUrl = issueArgument;
         const stdoutColor = createColorizer(process.stdout);
         const stderrColor = createColorizer(process.stderr);
 
@@ -82,21 +120,36 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         }
 
         const verbose = options.verbose === true || process.env[VERBOSE_ENV] === "1";
-        const result = await run(
-          removeUndefinedProperties({
-            issueUrl,
-            repo: options.repo,
-            base: options.base,
-            model: options.model,
-            draft: options.draft,
-            verbose: verbose ? true : undefined,
-          }),
-          {
-            onProgress: (event) => {
-              console.error(formatRunProgressEvent(event, stderrColor));
+        let result: RunCodexCageResult;
+        try {
+          result = await run(
+            removeUndefinedProperties({
+              issueUrl,
+              runId: options.runId,
+              repo: options.repo,
+              base: options.base,
+              model: options.model,
+              draft: options.draft,
+              verbose: verbose ? true : undefined,
+            }),
+            {
+              onProgress: (event) => {
+                console.error(formatRunProgressEvent(event, stderrColor));
+              },
             },
-          },
-        );
+          );
+        } catch (error) {
+          console.error(
+            stderrColor.failure(error instanceof Error ? error.message : String(error)),
+          );
+          result = {
+            runId: "unstarted",
+            status: "failed",
+            failureCode:
+              error instanceof RunFailureError ? error.failureCode : "internal_error",
+            prUrl: null,
+          };
+        }
 
         console.log(`${stdoutColor.label("Run")}: ${stdoutColor.info(result.runId)}`);
         console.log(
@@ -123,6 +176,21 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         }
       },
     );
+
+  program
+    .command("control-room")
+    .description("Start the local Codex Cage Control Room.")
+    .option("--host <host>", "bind address", "127.0.0.1")
+    .option("--port <port>", "listen port", parsePort)
+    .action(async (options: { host: string; port?: number }) => {
+      const controlRoom = await createControlRoomServer({
+        cwd: process.cwd(),
+        host: options.host,
+        ...(options.port === undefined ? {} : { port: options.port }),
+      });
+      console.log(`Control Room: ${controlRoom.url}`);
+      await waitForShutdown(controlRoom.close);
+    });
 
   const runs = program.command("runs").description("Inspect prior Codex Cage runs.");
 
@@ -220,6 +288,65 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     });
 
   return program;
+}
+
+function parseOnOff(value: string): boolean {
+  switch (value.toLowerCase()) {
+    case "on":
+    case "true":
+    case "yes":
+      return true;
+    case "off":
+    case "false":
+    case "no":
+      return false;
+    default:
+      throw new Error('--actions must be "on" or "off".');
+  }
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new Error("--port must be an integer between 0 and 65535.");
+  }
+  return port;
+}
+
+async function waitForShutdown(close: () => Promise<void>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let stopping = false;
+    const shutdown = (): void => {
+      if (stopping) return;
+      stopping = true;
+      void close().then(resolve, reject);
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
+}
+
+function printSetupResult(result: SetupResult, color: Colorizer): void {
+  for (const path of result.created) console.log(`${color.success("created")} ${path}`);
+  for (const path of result.updated) console.log(`${color.warning("updated")} ${path}`);
+  for (const path of result.removed) console.log(`${color.muted("removed")} ${path}`);
+  console.log(
+    `${color.label("GitHub Actions")}: ${result.actionsEnabled ? color.success("enabled") : color.muted("disabled")}`,
+  );
+  if (result.dryRun) console.log(color.warning("Dry run only; no files were changed."));
+  for (const notice of result.notices) console.log(color.warning(notice));
+}
+
+function printDoctorResult(result: DoctorResult, color: Colorizer): void {
+  for (const check of result.checks) {
+    const marker =
+      check.status === "pass"
+        ? color.success("pass")
+        : check.status === "warning"
+          ? color.warning("warn")
+          : color.failure("fail");
+    console.log(`${marker} ${color.label(check.name)}: ${check.message}`);
+  }
 }
 
 function formatRunProgressEvent(

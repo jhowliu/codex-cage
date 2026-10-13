@@ -21,6 +21,8 @@ test("config schema accepts a minimal valid config", () => {
     image: defaultSandboxImage,
     dockerfile: null,
   });
+  assert.equal(config.actions.enabled, false);
+  assert.equal(config.actions.workflow, ".github/workflows/codex-cage.yml");
 });
 
 test("config schema rejects empty verify commands", () => {
@@ -104,4 +106,35 @@ test("config schema accepts an explicit execution mode", () => {
   });
 
   assert.equal(config.execution, "direct");
+});
+
+test("config schema accepts GitHub Actions settings", () => {
+  const config = codexCageConfigSchema.parse({
+    verify: ["npm test"],
+    actions: {
+      enabled: true,
+      codex_cage_version: "0.1.0",
+      services: {
+        postgres: {
+          image: "postgres:17",
+          env: { POSTGRES_PASSWORD: "postgres" },
+        },
+      },
+    },
+  });
+
+  assert.equal(config.actions.enabled, true);
+  assert.equal(config.actions.runner, "ubuntu-latest");
+  assert.equal(config.actions.services.postgres?.image, "postgres:17");
+});
+
+test("config schema requires a pinned version when Actions is enabled", () => {
+  assert.throws(
+    () =>
+      codexCageConfigSchema.parse({
+        verify: ["npm test"],
+        actions: { enabled: true },
+      }),
+    /must be set when GitHub Actions is enabled/,
+  );
 });

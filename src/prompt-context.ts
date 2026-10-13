@@ -3,7 +3,9 @@ import { access } from "node:fs/promises";
 import { posix, resolve } from "node:path";
 
 export const reviewPolicyPath = ".codex-cage/review-policy.md";
-export const defaultPromptWorkspacePath = "/workspace";
+// Agents run with the cloned repository as their working directory in both
+// Docker and direct mode, so a relative policy path is valid in both runtimes.
+export const defaultPromptWorkspacePath = ".";
 
 export type ReviewPolicyStatus = "present" | "missing";
 

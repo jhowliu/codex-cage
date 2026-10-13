@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 930" width="1340" height="930">
+<defs>
+<style>
+text{font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Helvetica Neue",Arial,sans-serif}
+.bt{font-size:13px;font-weight:700;fill:#1F2430}
+.bs{font-size:10px;fill:#7A8190}
+.zl{font-size:10.5px;fill:#6B7280}
+.al{font-size:9.5px}
+.hd{font-size:11px;fill:#6B7280}
+.lg{font-size:11px;fill:#4B5160}
+</style>
+<marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3F4FB8"/></marker>
+<marker id="mg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2E9E6B"/></marker>
+<marker id="mo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#B8631F"/></marker>
+<marker id="my" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#8F96A3"/></marker>
+</defs>
+<rect width="1340" height="930" fill="#fff"/>
+<text x="20" y="30" class="hd">Codex Cage 系統架構圖</text>
+<rect x="20" y="46" width="1300" height="854" rx="8" fill="#EEF0F3" stroke="#E0E3E8"/>
+<rect x="232" y="78" width="710" height="760" rx="8" fill="none" stroke="#B4BAC4" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="246" y="96" class="zl">執行主機 — 本機 / self-hosted(Docker mode)或 GitHub Actions runner(Direct mode)</text>
+<rect x="248" y="110" width="678" height="210" rx="8" fill="none" stroke="#B4BAC4" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="262" y="128" class="zl">Codex Cage 協調器(Node.js ≥ 22 · TypeScript CLI)</text>
+<rect x="248" y="356" width="678" height="214" rx="8" fill="none" stroke="#B4BAC4" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="262" y="374" class="zl">隔離工作區(ShellRunner 介面 · 依 execution mode 二選一)</text>
+<rect x="478" y="606" width="448" height="112" rx="8" fill="none" stroke="#B4BAC4" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="492" y="624" class="zl">驗證與發佈</text>
+<rect x="980" y="110" width="320" height="608" rx="8" fill="none" stroke="#B4BAC4" stroke-width="1" stroke-dasharray="4 3"/>
+<text x="994" y="128" class="zl">外部服務</text>
+<rect x="36" y="126" width="160" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="48" y="153" class="bt">開發者 CLI</text>
+<text x="48" y="172" class="bs">codex-cage run &lt;issue-url&gt;</text>
+<rect x="36" y="226" width="160" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="48" y="253" class="bt">GitHub Actions</text>
+<text x="48" y="272" class="bs">issue 加 label 觸發</text>
+<rect x="262" y="138" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="274" y="165" class="bt">CLI 指令層</text>
+<text x="274" y="184" class="bs">commander · setup / run / doctor</text>
+<rect x="492" y="138" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="504" y="165" class="bt">Run Workflow</text>
+<text x="504" y="184" class="bs">phase 編排 · 迭代迴圈</text>
+<rect x="722" y="138" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="734" y="165" class="bt">Issue 讀取</text>
+<text x="734" y="184" class="bs">issue + comments → prompt</text>
+<rect x="262" y="240" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="274" y="267" class="bt">設定與憑證</text>
+<text x="274" y="286" class="bs">.codex-cage.yml · .env · zod</text>
+<rect x="722" y="240" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="734" y="267" class="bt">RunStore</text>
+<text x="734" y="286" class="bs">SQLite (sql.js) · artifacts</text>
+<rect x="262" y="388" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="274" y="415" class="bt">Host Workspace</text>
+<text x="274" y="434" class="bs">Direct mode · runner 臨時 VM</text>
+<rect x="492" y="388" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="504" y="415" class="bt">ShellRunner</text>
+<text x="504" y="434" class="bs">統一執行 · 逾時 · 脫敏</text>
+<rect x="722" y="388" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="734" y="415" class="bt">Docker Sandbox</text>
+<text x="734" y="434" class="bs">Docker mode · volume · Compose</text>
+<rect x="492" y="490" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="504" y="517" class="bt">Codex CLI</text>
+<text x="504" y="536" class="bs">codex exec · 實作 / 唯讀 review</text>
+<rect x="492" y="638" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="504" y="665" class="bt">品質關卡</text>
+<text x="504" y="684" class="bs">verify → secret guard → review</text>
+<rect x="722" y="638" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="734" y="665" class="bt">Publish</text>
+<text x="734" y="684" class="bs">git push · gh pr create</text>
+<rect x="1000" y="138" width="280" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="1012" y="165" class="bt">Issue 來源</text>
+<text x="1012" y="184" class="bs">GitHub REST API · Linear GraphQL</text>
+<rect x="1000" y="388" width="280" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="1012" y="415" class="bt">GHCR</text>
+<text x="1012" y="434" class="bs">ghcr.io/jhowliu/codex-cage/base</text>
+<rect x="1000" y="490" width="280" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="1012" y="517" class="bt">OpenAI</text>
+<text x="1012" y="536" class="bs">Codex 模型 API</text>
+<rect x="1000" y="638" width="280" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
+<text x="1012" y="665" class="bt">GitHub 儲存庫</text>
+<text x="1012" y="684" class="bs">clone · push branch · PR · labels</text>
+<path d="M196,158 H262" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M196,258 H216 V186 H262" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M452,170 H492" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M722,170 H682" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M587,202 V388" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M492,420 H452" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M682,420 H722" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M587,452 V490" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M600,554 V638" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M682,670 H722" fill="none" stroke="#3F4FB8" stroke-width="1.5" marker-end="url(#mb)"/>
+<path d="M660,638 V554" fill="none" stroke="#B8631F" stroke-width="1.5" marker-end="url(#mo)"/>
+<path d="M912,170 H1000" fill="none" stroke="#2E9E6B" stroke-width="1.5" marker-end="url(#mg)"/>
+<path d="M912,670 H1000" fill="none" stroke="#2E9E6B" stroke-width="1.5" marker-end="url(#mg)"/>
+<path d="M687,522 H1000" fill="none" stroke="#2E9E6B" stroke-width="1.5" marker-end="url(#mg)"/>
+<circle cx="682" cy="522" r="4.5" fill="#fff" stroke="#1F2430" stroke-width="1.4"/>
+<path d="M357,202 V240" fill="none" stroke="#8F96A3" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#my)"/>
+<path d="M650,202 V272 H722" fill="none" stroke="#8F96A3" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#my)"/>
+<path d="M912,420 H1000" fill="none" stroke="#8F96A3" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#my)"/>
+<text x="606" y="600" class="al" fill="#3F4FB8" text-anchor="start">diff</text>
+<text x="666" y="600" class="al" fill="#B8631F" text-anchor="start">失敗 → 回饋重試</text>
+<text x="248" y="752" class="zl">每個模式共用</text>
+<rect x="248" y="762" width="162" height="46" rx="5" fill="#fff" stroke="#D3D7DE"/>
+<text x="329.0" y="781" class="bt" text-anchor="middle" style="font-size:12px">有界重試</text>
+<text x="329.0" y="797" class="bs" text-anchor="middle" style="font-size:9.5px">max_iterations · review cycles</text>
+<rect x="420" y="762" width="162" height="46" rx="5" fill="#fff" stroke="#D3D7DE"/>
+<text x="501.0" y="781" class="bt" text-anchor="middle" style="font-size:12px">逾時控制</text>
+<text x="501.0" y="797" class="bs" text-anchor="middle" style="font-size:9.5px">總 90 · 指令 20 · 閒置 10 分</text>
+<rect x="592" y="762" width="162" height="46" rx="5" fill="#fff" stroke="#D3D7DE"/>
+<text x="673.0" y="781" class="bt" text-anchor="middle" style="font-size:12px">憑證脫敏</text>
+<text x="673.0" y="797" class="bs" text-anchor="middle" style="font-size:9.5px">日誌與 diff 先 redact 再落地</text>
+<rect x="764" y="762" width="162" height="46" rx="5" fill="#fff" stroke="#D3D7DE"/>
+<text x="845.0" y="781" class="bt" text-anchor="middle" style="font-size:12px">失敗碼與結果</text>
+<text x="845.0" y="797" class="bs" text-anchor="middle" style="font-size:9.5px">failureCode · --result-json</text>
+<line x1="300" y1="884" x2="330" y2="884" stroke="#3F4FB8" stroke-width="1.5"/>
+<text x="338" y="888" class="lg">主流程</text>
+<line x1="406.5" y1="884" x2="436.5" y2="884" stroke="#B8631F" stroke-width="1.5"/>
+<text x="444.5" y="888" class="lg">失敗回饋重試</text>
+<line x1="547.5" y1="884" x2="577.5" y2="884" stroke="#2E9E6B" stroke-width="1.5"/>
+<text x="585.5" y="888" class="lg">外部 API 呼叫</text>
+<line x1="723.0" y1="884" x2="753.0" y2="884" stroke="#8F96A3" stroke-width="1.5" stroke-dasharray="4 3"/>
+<text x="761.0" y="888" class="lg">設定 · 狀態 · 映像</text>
+<circle cx="939.0" cy="884" r="4.5" fill="#fff" stroke="#1F2430" stroke-width="1.4"/>
+<text x="953.0" y="888" class="lg">呼叫外部 AI</text>
+<rect x="1067.5" y="877" width="24" height="14" rx="3" fill="none" stroke="#B4BAC4" stroke-dasharray="3 2"/>
+<text x="1099.5" y="888" class="lg">主機以外</text>
+</svg>

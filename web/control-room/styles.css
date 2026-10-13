@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #182338;
+  --color-muted: #778398;
+  --color-soft-muted: #a1acbd;
+  --color-line: #e3e8f0;
+  --color-blue: #2163df;
+  --color-blue-dark: #164dbd;
+  --color-blue-soft: #edf3ff;
+  --color-green: #15906e;
+  --color-green-soft: #e6f7f0;
+  --color-amber: #bd7514;
+  --color-red: #c94751;
+  --color-red-soft: #fff0f1;
+  --color-violet: #7655c5;
+  --font-sans: "Inter Variable", "Inter", "Segoe UI", sans-serif;
+  --font-mono: "Fira Code", monospace;
+  --shadow-shell: 0 30px 70px rgb(33 75 142 / 18%);
+  --shadow-panel: 0 14px 40px rgb(47 83 142 / 8%);
+  --shadow-button: 0 8px 18px rgb(33 99 223 / 18%);
+  --shadow-button-hover: 0 9px 21px rgb(33 99 223 / 25%);
+  --shadow-modal: 0 24px 80px rgb(25 51 94 / 23%);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply min-w-[320px] bg-white font-sans text-ink;
+  }
+
+  button,
+  input {
+    font: inherit;
+  }
+
+  button,
+  a {
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  button:focus-visible,
+  a:focus-visible,
+  input:focus-visible {
+    @apply outline-[3px] outline-[#8db4ff] outline-offset-[3px];
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

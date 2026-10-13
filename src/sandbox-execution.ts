@@ -11,9 +11,16 @@ import {
 } from "./docker.js";
 import type { CommandResult, CommandRunOptions, CommandRunner } from "./publish.js";
 import type { ReviewAgentRunner } from "./review.js";
+import { RunFailureError } from "./run/errors.js";
 
 export type ShellRunner = {
   run(command: string, options?: DockerCommandOptions): Promise<CommandResult>;
+};
+
+export type ShellTimeouts = {
+  commandMs: number;
+  idleMs: number;
+  deadlineAt: number;
 };
 
 // A line-buffered output sink. Chunks are accumulated and each complete line is
@@ -95,6 +102,7 @@ export function createDockerShellRunner(
   sandbox: DockerSandbox,
   _env: Record<string, string>,
   sink?: StreamSink,
+  timeouts?: ShellTimeouts,
 ): ShellRunner {
   return {
     async run(
@@ -102,8 +110,7 @@ export function createDockerShellRunner(
       options: DockerCommandOptions = {},
     ): Promise<CommandResult> {
       const commandEnv = options.env ?? {};
-      const onData = options.onData ?? sink?.onData;
-      const result = await execa(
+      return await runProcess(
         "docker",
         dockerRunArgs({
           image: sandbox.image,
@@ -117,17 +124,11 @@ export function createDockerShellRunner(
         }),
         {
           env: commandEnv,
-          reject: false,
-          ...outputTeeOptions(onData),
+          onData: options.onData ?? sink?.onData,
+          sink,
+          ...resolveTimeouts(options, timeouts),
         },
       );
-      sink?.flush();
-
-      return {
-        exitCode: result.exitCode ?? 0,
-        stdout: result.stdout,
-        stderr: result.stderr,
-      };
     },
   };
 }
@@ -136,41 +137,140 @@ export function createHostShellRunner(
   workspacePath: string,
   env: Record<string, string> = {},
   sink?: StreamSink,
+  timeouts?: ShellTimeouts,
 ): ShellRunner {
   return {
     async run(
       command: string,
       options: DockerCommandOptions = {},
     ): Promise<CommandResult> {
-      const commandEnv = { ...env, ...(options.env ?? {}) };
-      const onData = options.onData ?? sink?.onData;
-      const result = await execa(
+      const commandEnv = { ...safeHostEnvironment(), ...env, ...(options.env ?? {}) };
+      return await runProcess(
         commandWithGitHubAuth(
           hostCommandWithCodexAuth(command, options.codexAuthFilePath, commandEnv),
           commandEnv,
         ),
+        [],
         {
           shell: true,
           cwd: workspacePath,
           env: commandEnv,
-          // Close stdin so host commands get EOF immediately. Codex CLI's
-          // `exec` reads stdin and would otherwise hang waiting for input
-          // that never arrives (the Docker runner is immune because the
-          // container has no stdin attached).
-          stdin: "ignore",
-          reject: false,
-          ...outputTeeOptions(onData),
+          onData: options.onData ?? sink?.onData,
+          sink,
+          ...resolveTimeouts(options, timeouts),
         },
       );
-      sink?.flush();
-
-      return {
-        exitCode: result.exitCode ?? 0,
-        stdout: result.stdout,
-        stderr: result.stderr,
-      };
     },
   };
+}
+
+type ProcessOptions = {
+  cwd?: string;
+  env: Record<string, string>;
+  shell?: boolean;
+  onData: ((chunk: string) => void) | undefined;
+  sink: StreamSink | undefined;
+  timeoutMs: number | undefined;
+  idleTimeoutMs: number | undefined;
+};
+
+async function runProcess(
+  command: string,
+  args: readonly string[],
+  options: ProcessOptions,
+): Promise<CommandResult> {
+  const controller = new AbortController();
+  let idleTimer: NodeJS.Timeout | undefined;
+  const resetIdleTimer = (): void => {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    if (options.idleTimeoutMs !== undefined) {
+      idleTimer = setTimeout(() => controller.abort(), options.idleTimeoutMs);
+    }
+  };
+  const onData = (chunk: string): void => {
+    resetIdleTimer();
+    options.onData?.(chunk);
+  };
+  resetIdleTimer();
+
+  try {
+    const processResult = await execa(command, args, {
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.shell === undefined ? {} : { shell: options.shell }),
+      env: options.env,
+      extendEnv: false,
+      stdin: "ignore",
+      reject: false,
+      cancelSignal: controller.signal,
+      ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+      ...outputTeeOptions(onData),
+    });
+    return {
+      exitCode:
+        processResult.exitCode ??
+        (processResult.timedOut || processResult.isCanceled ? 124 : 1),
+      stdout: processResult.stdout,
+      stderr: processResult.stderr,
+    };
+  } catch (error) {
+    return processErrorResult(error);
+  } finally {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    options.sink?.flush();
+  }
+}
+
+function resolveTimeouts(
+  options: DockerCommandOptions,
+  defaults: ShellTimeouts | undefined,
+): { timeoutMs: number | undefined; idleTimeoutMs: number | undefined } {
+  const remaining = defaults === undefined ? undefined : defaults.deadlineAt - Date.now();
+  const commandTimeout = options.timeoutMs ?? defaults?.commandMs;
+  const timeoutMs =
+    remaining === undefined
+      ? commandTimeout
+      : Math.max(1, Math.min(commandTimeout ?? remaining, remaining));
+  return {
+    timeoutMs,
+    idleTimeoutMs: options.idleTimeoutMs ?? defaults?.idleMs,
+  };
+}
+
+function processErrorResult(error: unknown): CommandResult {
+  if (error !== null && typeof error === "object") {
+    const stdout =
+      "stdout" in error && typeof error.stdout === "string" ? error.stdout : "";
+    const stderr =
+      "stderr" in error && typeof error.stderr === "string" ? error.stderr : "";
+    const timedOut =
+      ("timedOut" in error && error.timedOut === true) ||
+      ("isCanceled" in error && error.isCanceled === true);
+    return { exitCode: timedOut ? 124 : 1, stdout, stderr };
+  }
+  return { exitCode: 1, stdout: "", stderr: String(error) };
+}
+
+function safeHostEnvironment(): Record<string, string> {
+  const allowed = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "CI",
+    "TERM",
+    "SHELL",
+    "USER",
+    "LOGNAME",
+    "SYSTEMROOT",
+    "WINDIR",
+  ] as const;
+  return Object.fromEntries(
+    allowed.flatMap((name) => {
+      const value = process.env[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  );
 }
 
 export async function requiredShell(
@@ -183,6 +283,7 @@ export async function requiredShell(
   const log = redactor(formatCommandLog(command, result));
 
   if (result.exitCode !== 0) {
+    if (result.exitCode === 124) throw new RunFailureError("timeout", log);
     throw new Error(log);
   }
 
@@ -237,6 +338,9 @@ export function createReviewAgentRunner(
       const result = await shell.run(command, options);
 
       if (result.exitCode !== 0) {
+        if (result.exitCode === 124) {
+          throw new RunFailureError("timeout", formatCommandLog(command, result));
+        }
         throw new Error(formatCommandLog(command, result));
       }
 

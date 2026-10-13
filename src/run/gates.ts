@@ -15,6 +15,7 @@ import {
   buildReviewPrompt,
   runIndependentReview,
   type ReviewNextAction,
+  type ReviewReport,
 } from "../review.js";
 import {
   createGhCommandRunner,
@@ -42,11 +43,10 @@ export type RunGateJournal = {
   addReviewCycle: (input: {
     cycle: number;
     decision: ReviewDecision;
-    report: unknown;
+    report: ReviewReport;
   }) => Promise<void>;
   writeArtifact: (name: string, content: string) => Promise<string>;
   writeJsonArtifact: (name: string, value: unknown) => Promise<void>;
-  recordSuccess: (prUrl: string) => Promise<void>;
 };
 
 export type SecretGuardGateResult =
@@ -209,7 +209,6 @@ export async function runPublishGate(input: {
 
   await input.journal.writeJsonArtifact("pr.json", publishResult);
   await input.journal.writeArtifact("final.patch", await readCurrentDiff(input.shell));
-  await input.journal.recordSuccess(publishResult.prUrl);
 
   return publishResult;
 }
