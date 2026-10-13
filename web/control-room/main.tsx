@@ -5,6 +5,7 @@ import { TaskModal, RepositoryModal } from "./components/modals";
 import { RepositoriesPage, RunsPage } from "./components/pages";
 import {
   emptySnapshot,
+  type AuthStatus,
   type PageName,
   type Repository,
   type Run,
@@ -19,6 +20,14 @@ import {
 } from "./utils";
 import "@fontsource-variable/inter";
 import "./styles.css";
+
+const defaultAuthStatus: AuthStatus = {
+  provider: "github",
+  status: "unavailable",
+  source: "none",
+  message: "Checking GitHub authentication…",
+  checkedAt: "",
+};
 
 function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
@@ -36,6 +45,8 @@ function App(): JSX.Element {
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("Connecting to local Control Room...");
   const [busy, setBusy] = useState(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(defaultAuthStatus);
+  const [authRefreshing, setAuthRefreshing] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const readyRepositories = snapshot.repositories.filter(
@@ -93,8 +104,29 @@ function App(): JSX.Element {
         fetchJson<Run[]>("/api/runs"),
       ]);
       setSnapshot({ repositories, runs });
+      await refreshAuth();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function refreshAuth(): Promise<void> {
+    setAuthRefreshing(true);
+    try {
+      const status = await fetchJson<AuthStatus>("/api/auth/status");
+      setAuthStatus(status);
+      setNotice("GitHub authentication status refreshed");
+    } catch (error) {
+      setAuthStatus({
+        provider: "github",
+        status: "unavailable",
+        source: "none",
+        message: "Could not check GitHub authentication. Try again shortly.",
+        checkedAt: new Date().toISOString(),
+      });
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAuthRefreshing(false);
     }
   }
 
@@ -189,6 +221,9 @@ function App(): JSX.Element {
       activeRuns={activeRuns}
       notice={notice}
       onRefresh={() => void refresh()}
+      authStatus={authStatus}
+      authRefreshing={authRefreshing}
+      onRefreshAuth={() => void refreshAuth()}
       overlays={
         <>
           {taskModalOpen && (

@@ -11,6 +11,11 @@ import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { loadCodexCageConfigFile } from "./config-file.js";
+import {
+  readGithubAuthStatus,
+  type GithubAuthFetcher,
+  type GithubAuthStatus,
+} from "./control-room-auth.js";
 import { parseIssueUrl } from "./issue.js";
 import { defaultGitRemoteReader, parseGithubRepo } from "./repo.js";
 import {
@@ -472,9 +477,14 @@ export async function createControlRoomServer(options: {
   host?: string;
   port?: number;
   launchRunner?: LocalRunnerLauncher;
+  githubAuthFetch?: GithubAuthFetcher;
 }): Promise<ControlRoomServer> {
   const store = await openControlRoomStore(options.cwd);
-  const room = new ControlRoom(store, options.launchRunner ?? launchLocalRunner);
+  const room = new ControlRoom(
+    store,
+    options.launchRunner ?? launchLocalRunner,
+    options.githubAuthFetch ?? fetch,
+  );
   const server = createServer((request, response) => {
     void room.handle(request, response);
   });
@@ -527,10 +537,16 @@ export type ControlRoomServer = {
 class ControlRoom {
   readonly #store: ControlRoomStore;
   readonly #provider: LocalExecutionProvider;
+  readonly #githubAuthFetch: GithubAuthFetcher;
   readonly #clients = new Set<ServerResponse>();
 
-  constructor(store: ControlRoomStore, launchRunner: LocalRunnerLauncher) {
+  constructor(
+    store: ControlRoomStore,
+    launchRunner: LocalRunnerLauncher,
+    githubAuthFetch: GithubAuthFetcher,
+  ) {
     this.#store = store;
+    this.#githubAuthFetch = githubAuthFetch;
     this.#provider = new LocalExecutionProvider({
       store,
       launchRunner,
@@ -557,6 +573,14 @@ class ControlRoom {
       }
       if (request.method === "GET" && url.pathname === "/api/health") {
         sendJson(response, 200, { status: "ok", provider: this.#provider.capabilities });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/auth/status") {
+        const status: GithubAuthStatus = await readGithubAuthStatus(
+          this.#store.cwd,
+          this.#githubAuthFetch,
+        );
+        sendJson(response, 200, status);
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/repositories") {

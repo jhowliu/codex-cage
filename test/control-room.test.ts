@@ -357,6 +357,85 @@ test("Control Room rejects invalid repository and unsupported Work Item requests
   }
 });
 
+test("Control Room reports GitHub auth status without exposing the configured token", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-auth-"));
+  await writeFile(
+    join(cwd, ".codex-cage.env"),
+    "GITHUB_TOKEN=test-token-value\n",
+    "utf8",
+  );
+  const server = await createControlRoomServer({
+    cwd,
+    port: 0,
+    launchRunner: fakeRunner(),
+    githubAuthFetch: async () =>
+      new Response(null, { status: 401, statusText: "Unauthorized" }),
+  });
+
+  try {
+    const response = await fetch(`${server.url}/api/auth/status`);
+    const status = (await response.json()) as {
+      provider: string;
+      status: string;
+      source: string;
+      message: string;
+      checkedAt: string;
+    };
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      {
+        provider: status.provider,
+        status: status.status,
+        source: status.source,
+        message: status.message,
+      },
+      {
+        provider: "github",
+        status: "invalid",
+        source: "codex-cage-env",
+        message:
+          "GitHub rejected the configured token. Update .codex-cage.env, then recheck.",
+      },
+    );
+    assert.match(status.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.doesNotMatch(JSON.stringify(status), /test-token-value/);
+  } finally {
+    await server.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Control Room reports missing GitHub auth without making a network request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-auth-missing-"));
+  const server = await createControlRoomServer({
+    cwd,
+    port: 0,
+    launchRunner: fakeRunner(),
+    githubAuthFetch: async () => {
+      throw new Error("Auth check should not run without a token.");
+    },
+  });
+
+  try {
+    const response = await fetch(`${server.url}/api/auth/status`);
+    const status = (await response.json()) as {
+      status: string;
+      source: string;
+      message: string;
+    };
+    assert.equal(response.status, 200);
+    assert.equal(status.status, "missing");
+    assert.equal(status.source, "none");
+    assert.equal(
+      status.message,
+      "Add GITHUB_TOKEN to .codex-cage.env, then recheck authentication.",
+    );
+  } finally {
+    await server.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("Control Room exposes a loopback SSE snapshot stream", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-sse-"));
   const server = await createControlRoomServer({

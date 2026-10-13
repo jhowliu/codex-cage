@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { PageName } from "../types";
+import type { AuthStatus, PageName } from "../types";
 import { Icon } from "./ui";
 
 export function AppShell({
@@ -7,6 +7,9 @@ export function AppShell({
   activeRuns,
   notice,
   onRefresh,
+  authStatus,
+  authRefreshing,
+  onRefreshAuth,
   children,
   overlays,
 }: {
@@ -14,6 +17,9 @@ export function AppShell({
   activeRuns: number;
   notice: string;
   onRefresh: () => void;
+  authStatus: AuthStatus;
+  authRefreshing: boolean;
+  onRefreshAuth: () => void;
   children: ReactNode;
   overlays?: ReactNode;
 }): JSX.Element {
@@ -47,7 +53,12 @@ export function AppShell({
             active={page === "repositories"}
           />
         </nav>
-        <div className="mt-auto grid gap-[23px] max-md:hidden">
+        <div className="mt-auto grid gap-[14px] max-md:hidden">
+          <AuthStatusCard
+            status={authStatus}
+            refreshing={authRefreshing}
+            onRefresh={onRefreshAuth}
+          />
           <div className="flex items-start gap-[9px] rounded-[10px] border border-[#e6ebf2] bg-[#fbfdfc] p-[13px_11px] text-green">
             <Icon name="shield" size={15} />
             <span className="grid gap-[3px]">
@@ -80,6 +91,7 @@ export function AppShell({
               <span className="size-[7px] shrink-0 rounded-full bg-green shadow-[0_0_0_3px_#d8f3e9]" />
               {notice}
             </span>
+            <AuthStatusChip status={authStatus} />
             <button
               className="grid size-[38px] shrink-0 place-items-center rounded-[9px] border border-line bg-white text-[#63728a] transition hover:border-[#b5c9ee] hover:bg-blue-soft hover:text-blue"
               type="button"
@@ -107,6 +119,113 @@ export function AppShell({
       {overlays}
     </div>
   );
+}
+
+function AuthStatusCard({
+  status,
+  refreshing,
+  onRefresh,
+}: {
+  status: AuthStatus;
+  refreshing: boolean;
+  onRefresh: () => void;
+}): JSX.Element {
+  const tone = authStatusTone(status.status);
+
+  return (
+    <section
+      className="grid gap-2 rounded-[10px] border border-[#e6ebf2] bg-[#fbfcff] p-[11px]"
+      aria-label="GitHub authentication status"
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={`grid size-7 shrink-0 place-items-center rounded-lg ${tone.icon}`}
+        >
+          <Icon name="github" size={14} />
+        </span>
+        <span className="grid min-w-0 gap-0.5">
+          <strong className="text-[10px] text-[#3a5066]">GitHub auth</strong>
+          <span className={`flex items-center gap-1 font-mono text-[9px] ${tone.text}`}>
+            <span className={`size-[6px] rounded-full ${tone.dot}`} aria-hidden="true" />
+            {tone.label}
+          </span>
+        </span>
+      </div>
+      <p className="m-0 text-[9px] leading-[1.45] text-soft-muted">{status.message}</p>
+      <span className="font-mono text-[8px] text-soft-muted">
+        {status.source === "codex-cage-env"
+          ? "Source: .codex-cage.env"
+          : "Source: not configured"}
+      </span>
+      <button
+        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md border border-line bg-white px-2 text-[9px] font-bold text-[#526178] transition hover:border-[#abc2ed] hover:bg-blue-soft hover:text-blue disabled:cursor-not-allowed disabled:opacity-50"
+        type="button"
+        onClick={onRefresh}
+        disabled={refreshing}
+      >
+        <Icon name="refresh" size={12} />
+        {refreshing ? "Checking…" : "Recheck"}
+      </button>
+    </section>
+  );
+}
+
+function AuthStatusChip({ status }: { status: AuthStatus }): JSX.Element {
+  const tone = authStatusTone(status.status);
+
+  return (
+    <span
+      className={`hidden items-center gap-1.5 rounded-full px-2 py-1 font-mono text-[9px] ${tone.chip} max-md:inline-flex`}
+      title={`GitHub auth: ${tone.label}`}
+      aria-label={`GitHub auth: ${tone.label}`}
+    >
+      <span className={`size-[6px] rounded-full ${tone.dot}`} aria-hidden="true" />
+      {tone.label}
+    </span>
+  );
+}
+
+function authStatusTone(status: AuthStatus["status"]): {
+  label: string;
+  dot: string;
+  text: string;
+  icon: string;
+  chip: string;
+} {
+  if (status === "connected") {
+    return {
+      label: "Connected",
+      dot: "bg-green",
+      text: "text-green",
+      icon: "bg-green-soft text-green",
+      chip: "bg-green-soft text-green",
+    };
+  }
+  if (status === "invalid") {
+    return {
+      label: "Invalid",
+      dot: "bg-red",
+      text: "text-red",
+      icon: "bg-red-soft text-red",
+      chip: "bg-red-soft text-red",
+    };
+  }
+  if (status === "missing") {
+    return {
+      label: "Missing",
+      dot: "bg-amber",
+      text: "text-[#a26c00]",
+      icon: "bg-amber-soft text-[#a26c00]",
+      chip: "bg-amber-soft text-[#a26c00]",
+    };
+  }
+  return {
+    label: "Unavailable",
+    dot: "bg-amber",
+    text: "text-[#a26c00]",
+    icon: "bg-amber-soft text-[#a26c00]",
+    chip: "bg-amber-soft text-[#a26c00]",
+  };
 }
 
 function NavLink({
