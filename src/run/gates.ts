@@ -168,6 +168,12 @@ export async function runPublishGate(input: {
   verification: Extract<VerificationResult, { passed: true }>;
 }): Promise<PublishSuccessfulRunResult> {
   await input.journal.setRunStatus("creating_pr");
+  // Publishing commits the workspace; reading HEAD's diff afterwards loses the
+  // very changes that the results view and final artifact need to show.
+  await input.journal.writeArtifact(
+    "final.patch",
+    input.redactor(await readCurrentDiff(input.shell)),
+  );
   const publishResult = await input.journal.runPhase("pr", async () => {
     let result;
     const publishCredentials = input.context.credentials.command("publish");
@@ -208,7 +214,6 @@ export async function runPublishGate(input: {
   });
 
   await input.journal.writeJsonArtifact("pr.json", publishResult);
-  await input.journal.writeArtifact("final.patch", await readCurrentDiff(input.shell));
 
   return publishResult;
 }

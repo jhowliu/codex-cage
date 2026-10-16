@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type JSX } from "react";
 import type { Repository, Run } from "../types";
 import { formatTime, issueNumber } from "../utils";
 import { RunDetails } from "./run-details";

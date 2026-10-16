@@ -1,4 +1,4 @@
-import type { FormEvent, RefObject } from "react";
+import type { FormEvent, JSX, RefObject } from "react";
 import type { Repository } from "../types";
 import { issueNumber, normalizeGithubIssueUrl } from "../utils";
 import {

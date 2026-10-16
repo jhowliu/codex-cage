@@ -11,6 +11,7 @@ import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { loadCodexCageConfigFile } from "./config-file.js";
+import { buildStageResult } from "./control-room-results.js";
 import {
   readGithubAuthStatus,
   type GithubAuthFetcher,
@@ -629,6 +630,28 @@ class ControlRoom {
           sendJson(response, 202, this.#store.getPublicRun(runId));
           return;
         }
+      }
+
+      const stageResultMatch = url.pathname.match(
+        /^\/api\/runs\/([^/]+)\/stages\/([^/]+)$/,
+      );
+      if (request.method === "GET" && stageResultMatch !== null) {
+        const runId = decodeURIComponent(stageResultMatch[1] ?? "");
+        const stage = z
+          .enum(canonicalStages)
+          .parse(decodeURIComponent(stageResultMatch[2] ?? ""));
+        const result = await buildStageResult(
+          this.#store.getRun(runId),
+          stage,
+          async (name) => {
+            const path = this.#store.artifactPath(runId, name);
+            if ((await stat(path)).size > 2_000_000)
+              throw new Error("Evidence preview is too large.");
+            return await readFile(path, "utf8");
+          },
+        );
+        sendJson(response, 200, result);
+        return;
       }
 
       const artifactMatch = url.pathname.match(

@@ -51,6 +51,17 @@ the execution authority, while the Control Room stores a projection of its valid
 events. GitHub-hosted Actions remains a separate direct-mode workflow and is not
 made live by the local Control Room.
 
+Open a Run and select a stage to see its **Results**: preparation checks and target
+branches, a readable file diff, verification command outcomes, independent review
+findings, or published branch and PR metadata. **Events** and **Logs & artifacts**
+remain available for the selected stage. Result tabs support arrow keys and
+Home/End, and update from the existing live event projection.
+
+Change previews are saved after verification and secret checks. New Runs preserve
+the final patch before publishing commits the workspace. Older Runs without saved
+evidence show an explicit unavailable state; their existing PR remains the source
+for inspecting published changes.
+
 ## Token Setup
 
 Create `.codex-cage.env` in the host repo where you run Codex Cage:
