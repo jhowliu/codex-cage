@@ -6,6 +6,7 @@ issues/
 scripts/
 PRD.md
 recap.md
+docs/oat-agents-research.md
 .codex-cage.env
 .codex-cage/runs/
 .codex-cage/*.sqlite
