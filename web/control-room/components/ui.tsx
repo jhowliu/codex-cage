@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { JSX, ReactNode } from "react";
 import type { IconName, RepositoryStatus, RunStatus } from "../types";
 
 export const panelClass = "rounded-xl border border-line bg-white shadow-panel";

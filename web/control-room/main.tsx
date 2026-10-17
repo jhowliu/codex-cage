@@ -1,22 +1,40 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import { AppShell } from "./components/layout";
 import { TaskModal, RepositoryModal } from "./components/modals";
 import { RepositoriesPage, RunsPage } from "./components/pages";
 import {
   emptySnapshot,
+  type AuthStatus,
   type PageName,
   type Repository,
   type Run,
   type Snapshot,
 } from "./types";
-import { fetchJson, isGithubIssueUrl, pageFromHash } from "./utils";
+import {
+  fetchJson,
+  isGithubIssueUrl,
+  normalizeGithubIssueUrl,
+  pageFromHash,
+  runIdFromHash,
+} from "./utils";
 import "@fontsource-variable/inter";
 import "./styles.css";
+
+const defaultAuthStatus: AuthStatus = {
+  provider: "github",
+  status: "unavailable",
+  source: "none",
+  message: "Checking GitHub authentication…",
+  checkedAt: "",
+};
 
 function App(): JSX.Element {
   const [snapshot, setSnapshot] = useState<Snapshot>(emptySnapshot);
   const [page, setPage] = useState<PageName>(() => pageFromHash());
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(() =>
+    runIdFromHash(),
+  );
   const [selectedRepositoryId, setSelectedRepositoryId] = useState("");
   const [repositorySearch, setRepositorySearch] = useState("");
   const [repositoryPath, setRepositoryPath] = useState("");
@@ -27,6 +45,8 @@ function App(): JSX.Element {
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("Connecting to local Control Room...");
   const [busy, setBusy] = useState(false);
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(defaultAuthStatus);
+  const [authRefreshing, setAuthRefreshing] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   const readyRepositories = snapshot.repositories.filter(
@@ -35,12 +55,16 @@ function App(): JSX.Element {
   const selectedRepository =
     snapshot.repositories.find((repository) => repository.id === selectedRepositoryId) ??
     snapshot.repositories[0];
+  const selectedRun = snapshot.runs.find((run) => run.id === selectedRunId);
   const activeRuns = snapshot.runs.filter(
     (run) => run.status === "queued" || run.status === "running",
   ).length;
 
   useEffect(() => {
-    const syncPage = (): void => setPage(pageFromHash());
+    const syncPage = (): void => {
+      setPage(pageFromHash());
+      setSelectedRunId(runIdFromHash());
+    };
     window.addEventListener("hashchange", syncPage);
     return () => window.removeEventListener("hashchange", syncPage);
   }, []);
@@ -80,8 +104,29 @@ function App(): JSX.Element {
         fetchJson<Run[]>("/api/runs"),
       ]);
       setSnapshot({ repositories, runs });
+      await refreshAuth();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function refreshAuth(): Promise<void> {
+    setAuthRefreshing(true);
+    try {
+      const status = await fetchJson<AuthStatus>("/api/auth/status");
+      setAuthStatus(status);
+      setNotice("GitHub authentication status refreshed");
+    } catch (error) {
+      setAuthStatus({
+        provider: "github",
+        status: "unavailable",
+        source: "none",
+        message: "Could not check GitHub authentication. Try again shortly.",
+        checkedAt: new Date().toISOString(),
+      });
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setAuthRefreshing(false);
     }
   }
 
@@ -103,11 +148,15 @@ function App(): JSX.Element {
       setFormError("Choose a ready repository before continuing.");
       return;
     }
-    if (taskStep === 2 && !isGithubIssueUrl(issueUrl)) {
-      setFormError(
-        "Enter a GitHub Issue URL, for example https://github.com/org/repo/issues/123.",
-      );
-      return;
+    if (taskStep === 2) {
+      const normalizedIssueUrl = normalizeGithubIssueUrl(issueUrl);
+      if (normalizedIssueUrl !== issueUrl) setIssueUrl(normalizedIssueUrl);
+      if (!isGithubIssueUrl(normalizedIssueUrl)) {
+        setFormError(
+          "Enter a secure GitHub Issue URL, for example https://github.com/org/repo/issues/123.",
+        );
+        return;
+      }
     }
     setFormError("");
     setTaskStep((step) => Math.min(3, step + 1));
@@ -137,11 +186,15 @@ function App(): JSX.Element {
   }
 
   async function createRun(): Promise<void> {
-    if (selectedRepositoryId === "" || !isGithubIssueUrl(issueUrl)) return;
+    const normalizedIssueUrl = normalizeGithubIssueUrl(issueUrl);
+    if (selectedRepositoryId === "" || !isGithubIssueUrl(normalizedIssueUrl)) return;
     await runAction(async () => {
       const run = await fetchJson<Run>("/api/runs", {
         method: "POST",
-        body: JSON.stringify({ repositoryId: selectedRepositoryId, issueUrl }),
+        body: JSON.stringify({
+          repositoryId: selectedRepositoryId,
+          issueUrl: normalizedIssueUrl,
+        }),
       });
       setIssueUrl("");
       setTaskModalOpen(false);
@@ -168,6 +221,9 @@ function App(): JSX.Element {
       activeRuns={activeRuns}
       notice={notice}
       onRefresh={() => void refresh()}
+      authStatus={authStatus}
+      authRefreshing={authRefreshing}
+      onRefreshAuth={() => void refreshAuth()}
       overlays={
         <>
           {taskModalOpen && (
@@ -224,7 +280,17 @@ function App(): JSX.Element {
           onAddRepository={openRepositoryModal}
         />
       ) : (
-        <RunsPage runs={snapshot.runs} onCreateTask={openTaskModal} />
+        <RunsPage
+          runs={snapshot.runs}
+          selectedRun={selectedRun}
+          onCreateTask={openTaskModal}
+          onSelectRun={(runId) => {
+            window.location.hash = `runs/${encodeURIComponent(runId)}`;
+          }}
+          onBack={() => {
+            window.location.hash = "runs";
+          }}
+        />
       )}
     </AppShell>
   );

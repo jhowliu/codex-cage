@@ -982,6 +982,57 @@ runtime:
   }
 });
 
+test("runCodexCage preserves accepted changes before the publisher commits the workspace", async () => {
+  const cwd = await createProject("verify:\n  - npm test\nagent:\n  max_iterations: 1\n");
+  const backing = happyPathShell();
+  let committed = false;
+  const shell: ShellRunner = {
+    async run(command, options) {
+      if (committed && command.includes("git add --intent-to-add"))
+        return commandResult();
+      return await backing.run(command, options);
+    },
+  };
+  try {
+    const result = await runCodexCage(
+      { cwd, issueUrl: issue.url },
+      {
+        executionMode: "docker",
+        generateRunId: () => "run-preserve-patch",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox([]),
+        createShellRunner: () => shell,
+        runIndependentReview: async () => passingReview(),
+        publishSuccessfulRun: async () => {
+          committed = true;
+          return {
+            branchName: "cage/fix",
+            commitMessage: "Fix",
+            prTitle: "Fix",
+            prBody: "body",
+            prUrl: "https://github.com/jhowliu/codex-cage/pull/1",
+          };
+        },
+      },
+    );
+    assert.equal(result.status, "succeeded");
+    const directory = join(cwd, ".codex-cage", "runs", "run-preserve-patch");
+    const finalPatch = await readFile(join(directory, "final.patch"), "utf8");
+    assert.match(finalPatch, /\+export const changed = true/);
+    assert.equal(await readFile(join(directory, "changes-1.patch"), "utf8"), finalPatch);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runCodexCage records verify failure after max iterations", async () => {
   const cwd = await createProject(`
 verify:

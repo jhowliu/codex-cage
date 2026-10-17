@@ -10,6 +10,13 @@ export type RunStatus =
   | "unknown";
 export type RepositoryStatus = "setup_required" | "invalid_config" | "ready" | "blocked";
 export type PageName = "runs" | "repositories";
+export type AuthStatus = {
+  provider: "github";
+  status: "connected" | "invalid" | "missing" | "unavailable";
+  source: "codex-cage-env" | "none";
+  message: string;
+  checkedAt: string;
+};
 export type IconName =
   | "alert"
   | "archive"

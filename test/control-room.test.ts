@@ -9,6 +9,7 @@ import {
   type LocalRunnerHandle,
 } from "../src/control-room.js";
 import { RunEventJournal } from "../src/run/events.js";
+import type { StageResult } from "../src/control-room-results.js";
 
 async function tempRepository(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), "codex-cage-control-room-repo-"));
@@ -58,6 +59,24 @@ function fakeRunner(): LocalRunnerLauncher {
           payload: {},
         });
         if (stage === "verify") {
+          const started = await journal.append({
+            type: "command.started",
+            stage,
+            stageAttempt: 1,
+            payload: { command: "npm test", logRef: join(directory, "verify.log") },
+          });
+          await journal.append({
+            type: "command.finished",
+            stage,
+            stageAttempt: 1,
+            payload: {
+              startedEventId: started.eventId,
+              command: "npm test",
+              logRef: join(directory, "verify.log"),
+              outcome: "succeeded",
+              exitCode: 0,
+            },
+          });
           await journal.append({
             type: "verification.updated",
             stage,
@@ -72,6 +91,25 @@ function fakeRunner(): LocalRunnerLauncher {
           });
         }
         if (stage === "review") {
+          await writeFile(
+            join(directory, "review-0.json"),
+            JSON.stringify({
+              decision: "pass",
+              summary: "No blocking issues.",
+              findings: [],
+            }),
+            "utf8",
+          );
+          await journal.append({
+            type: "artifact.created",
+            stage,
+            stageAttempt: 1,
+            payload: {
+              name: "review-0.json",
+              kind: "json",
+              artifactRef: join(directory, "review-0.json"),
+            },
+          });
           await journal.append({
             type: "review.finished",
             stage,
@@ -226,6 +264,29 @@ test("Control Room registers a ready repository, streams a local Run, and persis
       ],
     );
     assert.equal(detail.events.length > 10, true);
+    const prepare = await json<StageResult>(
+      `${first.url}/api/runs/${run.id}/stages/prepare`,
+    );
+    assert.ok(
+      prepare.stage === "prepare" &&
+        prepare.target?.issueTitle === "Control Room smoke path",
+    );
+    const verify = await json<StageResult>(
+      `${first.url}/api/runs/${run.id}/stages/verify`,
+    );
+    assert.ok(verify.stage === "verify" && verify.commands[0]?.exitCode === 0);
+    const review = await json<StageResult>(
+      `${first.url}/api/runs/${run.id}/stages/review`,
+    );
+    assert.ok(review.stage === "review" && review.report.status === "available");
+    const publish = await json<StageResult>(
+      `${first.url}/api/runs/${run.id}/stages/publish`,
+    );
+    assert.ok(publish.stage === "publish" && publish.change?.url === completed.prUrl);
+    assert.equal(
+      (await fetch(`${first.url}/api/runs/${run.id}/stages/unknown`)).status,
+      400,
+    );
   } finally {
     await first.close();
     await rm(repositoryPath, { recursive: true, force: true });
@@ -351,6 +412,85 @@ test("Control Room rejects invalid repository and unsupported Work Item requests
       }),
     });
     assert.equal(unsupported.status, 404);
+  } finally {
+    await server.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Control Room reports GitHub auth status without exposing the configured token", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-auth-"));
+  await writeFile(
+    join(cwd, ".codex-cage.env"),
+    "GITHUB_TOKEN=test-token-value\n",
+    "utf8",
+  );
+  const server = await createControlRoomServer({
+    cwd,
+    port: 0,
+    launchRunner: fakeRunner(),
+    githubAuthFetch: async () =>
+      new Response(null, { status: 401, statusText: "Unauthorized" }),
+  });
+
+  try {
+    const response = await fetch(`${server.url}/api/auth/status`);
+    const status = (await response.json()) as {
+      provider: string;
+      status: string;
+      source: string;
+      message: string;
+      checkedAt: string;
+    };
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      {
+        provider: status.provider,
+        status: status.status,
+        source: status.source,
+        message: status.message,
+      },
+      {
+        provider: "github",
+        status: "invalid",
+        source: "codex-cage-env",
+        message:
+          "GitHub rejected the configured token. Update .codex-cage.env, then recheck.",
+      },
+    );
+    assert.match(status.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.doesNotMatch(JSON.stringify(status), /test-token-value/);
+  } finally {
+    await server.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("Control Room reports missing GitHub auth without making a network request", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-auth-missing-"));
+  const server = await createControlRoomServer({
+    cwd,
+    port: 0,
+    launchRunner: fakeRunner(),
+    githubAuthFetch: async () => {
+      throw new Error("Auth check should not run without a token.");
+    },
+  });
+
+  try {
+    const response = await fetch(`${server.url}/api/auth/status`);
+    const status = (await response.json()) as {
+      status: string;
+      source: string;
+      message: string;
+    };
+    assert.equal(response.status, 200);
+    assert.equal(status.status, "missing");
+    assert.equal(status.source, "none");
+    assert.equal(
+      status.message,
+      "Add GITHUB_TOKEN to .codex-cage.env, then recheck authentication.",
+    );
   } finally {
     await server.close();
     await rm(cwd, { recursive: true, force: true });

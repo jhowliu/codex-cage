@@ -542,6 +542,9 @@ async function runImplementationLoop(input: {
     }
 
     await input.journal.recordSecretGuard({ status: "passed", retryable: false });
+    // Preserve the reviewed change while it is still uncommitted. Only expose it
+    // after the secret gate has accepted it, including during a live review.
+    await input.journal.writeArtifact(`changes-${iteration}.patch`, input.redactor(diff));
     await input.journal.finishStage();
 
     await input.journal.startStage("review");
