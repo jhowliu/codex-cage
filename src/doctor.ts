@@ -7,6 +7,7 @@ import { agentProvidersInUse, type AgentProvider } from "./agent/providers.js";
 import type { CodexCageConfig } from "./config.js";
 import { loadCodexCageConfigFile } from "./config-file.js";
 import {
+  githubTokenFromEnv,
   globalCredentialNames,
   globalCredentialsPath,
   hasAgentCredentials,
@@ -15,6 +16,13 @@ import {
   type CredentialEnv,
 } from "./credentials.js";
 import { requiredActionsSecretGroups } from "./github-actions.js";
+import {
+  ghAuthToken,
+  githubAccountEnvName,
+  githubAccountLogin,
+  githubAccountSetting,
+  type GhRunner,
+} from "./github-auth.js";
 import { GENERATED_WORKFLOW_MARKER } from "./setup.js";
 
 export type DoctorCheck =
@@ -96,11 +104,7 @@ export async function doctorProject(
       }),
     );
   }
-  checks.push(
-    env.GITHUB_TOKEN !== undefined || env.GH_TOKEN !== undefined
-      ? pass("github-auth", "GitHub authentication is available locally.")
-      : warning("github-auth", "Set GITHUB_TOKEN in .codex-cage.env for local runs."),
-  );
+  checks.push(await githubAuthCheck(env, (args) => runCommand("gh", args, cwd)));
 
   if (configState.config.actions.enabled) {
     await checkActions(cwd, configState.config.actions, agents, checks, runCommand);
@@ -109,6 +113,40 @@ export async function doctorProject(
   }
 
   return result(checks);
+}
+
+async function githubAuthCheck(
+  env: Record<string, string>,
+  gh: GhRunner,
+): Promise<DoctorCheck> {
+  const setting = githubAccountSetting(env);
+  if (setting.status === "invalid") {
+    return warning(
+      "github-auth",
+      `${githubAccountEnvName} in .codex-cage.env must be a GitHub login, got "${setting.value}".`,
+    );
+  }
+  if (githubTokenFromEnv(env) !== undefined) {
+    return pass("github-auth", "GITHUB_TOKEN is set in .codex-cage.env.");
+  }
+  const login = githubAccountLogin(setting);
+  if ((await ghAuthToken(login, gh)) !== null) {
+    return login === null
+      ? pass(
+          "github-auth",
+          "Local runs use the active gh account; run `codex-cage setup` to pin one for this repo.",
+        )
+      : pass("github-auth", `Local runs use gh account ${login}.`);
+  }
+  return login === null
+    ? warning(
+        "github-auth",
+        "Set GITHUB_TOKEN in .codex-cage.env or run `gh auth login`.",
+      )
+    : warning(
+        "github-auth",
+        `gh is not signed in as ${login} (${githubAccountEnvName}); run \`gh auth login\` or rerun \`codex-cage setup\`.`,
+      );
 }
 
 function agentAuthCheck(

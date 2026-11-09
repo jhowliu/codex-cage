@@ -122,6 +122,9 @@ test("prepareRunCredentials centralizes run-level credential policy", async () =
       codexAuthLookups += 1;
       return "/host/.codex/auth.json";
     },
+    findGithubToken: async () => {
+      throw new Error("An explicit GITHUB_TOKEN must not consult gh.");
+    },
   });
 
   assert.equal(codexAuthLookups, 1);
@@ -162,6 +165,7 @@ test("prepareRunCredentials skips OAuth lookup when OpenAI API key is present", 
     findCodexAuthFile: async () => {
       throw new Error("OAuth lookup should not be used.");
     },
+    findGithubToken: async () => null,
   });
 
   assert.deepEqual(credentials.command("implement"), {
@@ -208,6 +212,7 @@ test("prepareRunCredentials skips the Codex OAuth lookup when no role uses Codex
     findCodexAuthFile: async () => {
       throw new Error("OAuth lookup should not be used.");
     },
+    findGithubToken: async () => null,
   });
 
   assert.deepEqual(credentials.command("review"), {
@@ -245,4 +250,79 @@ test("mergeCredentialEnv layers repo values over the global agent credentials", 
 test("globalCredentialsPath follows XDG_CONFIG_HOME", () => {
   assert.equal(globalCredentialsPath({ XDG_CONFIG_HOME: "/xdg" }), "/xdg/codex-cage/env");
   assert.match(globalCredentialsPath({}), /\/\.config\/codex-cage\/env$/);
+});
+
+test("prepareRunCredentials takes GITHUB_TOKEN from the pinned gh account", async () => {
+  const lookups: (string | null)[] = [];
+  const credentials = await prepareRunCredentials({
+    cwd: "/repo",
+    agents: codexAgents,
+    readEnv: async () => ({
+      OPENAI_API_KEY: "openai-secret",
+      CODEX_CAGE_GH_USER: "work-account",
+      APP_ENV: "test",
+    }),
+    findCodexAuthFile: async () => null,
+    findGithubToken: async (login) => {
+      lookups.push(login);
+      return "gh-token";
+    },
+  });
+
+  assert.deepEqual(lookups, ["work-account"]);
+  assert.equal(credentials.githubToken(), "gh-token");
+  assert.deepEqual(credentials.command("clone").env, {
+    GITHUB_TOKEN: "gh-token",
+    GH_TOKEN: "gh-token",
+  });
+  // The account name is a setting: it is neither passed to commands nor redacted.
+  assert.deepEqual(credentials.command("setup").env, { APP_ENV: "test" });
+  assert.equal("CODEX_CAGE_GH_USER" in credentials.injectedSecrets(), false);
+  assert.equal(
+    credentials.redactor()("work-account gh-token"),
+    "work-account [REDACTED:GITHUB_TOKEN]",
+  );
+});
+
+test("prepareRunCredentials uses the active gh account when none is pinned", async () => {
+  const lookups: (string | null)[] = [];
+  const credentials = await prepareRunCredentials({
+    cwd: "/repo",
+    agents: codexAgents,
+    readEnv: async () => ({ OPENAI_API_KEY: "openai-secret" }),
+    findCodexAuthFile: async () => null,
+    findGithubToken: async (login) => {
+      lookups.push(login);
+      return null;
+    },
+  });
+
+  assert.deepEqual(lookups, [null]);
+  assert.equal(credentials.githubToken(), undefined);
+});
+
+test("prepareRunCredentials fails when the pinned gh account has no token", async () => {
+  await assert.rejects(
+    prepareRunCredentials({
+      cwd: "/repo",
+      agents: codexAgents,
+      readEnv: async () => ({ CODEX_CAGE_GH_USER: "work-account" }),
+      findCodexAuthFile: async () => null,
+      findGithubToken: async () => null,
+    }),
+    /gh has no github\.com token for work-account/,
+  );
+});
+
+test("prepareRunCredentials rejects a gh account that is not a GitHub login", async () => {
+  await assert.rejects(
+    prepareRunCredentials({
+      cwd: "/repo",
+      agents: codexAgents,
+      readEnv: async () => ({ CODEX_CAGE_GH_USER: "not a login" }),
+      findCodexAuthFile: async () => null,
+      findGithubToken: async () => "gh-token",
+    }),
+    /CODEX_CAGE_GH_USER in \.codex-cage\.env must be a GitHub login/,
+  );
 });

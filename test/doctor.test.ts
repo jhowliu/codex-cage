@@ -17,6 +17,12 @@ const quietRunner: DoctorCommandRunner = async () => ({
   stderr: "",
 });
 
+// Like quietRunner, but gh has no signed-in account.
+const signedOutRunner: DoctorCommandRunner = async (command, args, cwd) =>
+  command === "gh" && args[0] === "auth"
+    ? { exitCode: 1, stdout: "", stderr: "not logged in" }
+    : quietRunner(command, args, cwd);
+
 test("doctor reports missing configuration", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
   try {
@@ -152,7 +158,7 @@ test("doctor warns about GitHub credentials and loose permissions in the global 
     });
     await chmod(globalEnvPath, 0o644);
 
-    const result = await doctorProject(cwd, quietRunner);
+    const result = await doctorProject(cwd, signedOutRunner);
     const messages = result.checks
       .filter((check) => check.name === "global-credentials")
       .map((check) => check.message);
@@ -166,6 +172,49 @@ test("doctor warns about GitHub credentials and loose permissions in the global 
     );
   } finally {
     await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor reports which gh account local runs use", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const tokenCalls: (readonly string[])[] = [];
+  const runner: DoctorCommandRunner = async (command, args, commandCwd) => {
+    if (command === "gh" && args[0] === "auth" && args[1] === "token") {
+      tokenCalls.push(args);
+      return args.includes("work-account")
+        ? { exitCode: 0, stdout: "gh-token\n", stderr: "" }
+        : { exitCode: 1, stdout: "", stderr: "no such account" };
+    }
+    return quietRunner(command, args, commandCwd);
+  };
+  const githubAuth = async () =>
+    (await doctorProject(cwd, runner)).checks.find(
+      (check) => check.name === "github-auth",
+    );
+  try {
+    await writeFile(join(cwd, ".codex-cage.yml"), "verify:\n  - npm test\n", "utf8");
+
+    await writeFile(
+      join(cwd, ".codex-cage.env"),
+      "CODEX_CAGE_GH_USER=work-account\n",
+      "utf8",
+    );
+    const pinned = await githubAuth();
+    assert.equal(pinned?.status, "pass");
+    assert.match(pinned?.message ?? "", /gh account work-account/);
+    assert.ok(tokenCalls.at(-1)?.includes("--user"));
+
+    await writeFile(join(cwd, ".codex-cage.env"), "CODEX_CAGE_GH_USER=gone\n", "utf8");
+    const stale = await githubAuth();
+    assert.equal(stale?.status, "warning");
+    assert.match(stale?.message ?? "", /not signed in as gone/);
+
+    await writeFile(join(cwd, ".codex-cage.env"), "GITHUB_TOKEN=repo-token\n", "utf8");
+    const calls = tokenCalls.length;
+    assert.equal((await githubAuth())?.status, "pass");
+    assert.equal(tokenCalls.length, calls);
+  } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });

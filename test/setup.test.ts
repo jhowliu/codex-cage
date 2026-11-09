@@ -4,7 +4,57 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { parse } from "yaml";
-import { setupProject, type SetupPrompts } from "../src/setup.js";
+import type { GhRunner } from "../src/github-auth.js";
+import {
+  setupProject,
+  type SetupOptions,
+  type SetupPrompts,
+  type SetupResult,
+} from "../src/setup.js";
+
+// gh is signed out unless a test passes its own runner, so results never
+// depend on the developer's real gh accounts.
+const signedOutGh: GhRunner = async () => ({ exitCode: 1, stdout: "" });
+
+function setup(
+  cwd: string,
+  options?: SetupOptions,
+  prompts?: SetupPrompts,
+  gh: GhRunner = signedOutGh,
+): Promise<SetupResult> {
+  return setupProject(cwd, options, prompts, { gh });
+}
+
+function signedInGh(
+  logins: readonly string[],
+  active: string,
+  calls: (readonly string[])[] = [],
+): GhRunner {
+  return async (args) => {
+    calls.push(args);
+    if (args[0] === "auth" && args[1] === "status") {
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          hosts: {
+            "github.com": logins.map((login) => ({
+              state: "success",
+              active: login === active,
+              login,
+            })),
+          },
+        }),
+      };
+    }
+    if (args[0] === "auth" && args[1] === "token") {
+      const user = args[args.indexOf("--user") + 1];
+      return logins.includes(user ?? "")
+        ? { exitCode: 0, stdout: `token-for-${user}\n` }
+        : { exitCode: 1, stdout: "" };
+    }
+    return { exitCode: 1, stdout: "" };
+  };
+}
 
 // Setup writes agent credentials to the machine-wide file; keep it in a temp
 // directory so tests never touch the real ~/.config.
@@ -43,7 +93,7 @@ function acceptingPrompts(): SetupPrompts {
 test("setup detects commands and enables both local Docker and Actions", async () => {
   const cwd = await tempRepo();
   try {
-    const result = await setupProject(cwd, {}, acceptingPrompts());
+    const result = await setup(cwd, {}, acceptingPrompts());
     const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
       setup: string[];
       verify: string[];
@@ -85,7 +135,7 @@ test("setup is rerunnable and preserves unknown config", async () => {
       "# keep\nsetup:\n  - npm ci\nverify:\n  - npm test\nfuture_option: true\n",
       "utf8",
     );
-    await setupProject(cwd, { yes: true, actions: false });
+    await setup(cwd, { yes: true, actions: false });
     const source = await readFile(join(cwd, ".codex-cage.yml"), "utf8");
 
     assert.match(source, /# keep/);
@@ -99,8 +149,8 @@ test("setup is rerunnable and preserves unknown config", async () => {
 test("disabling Actions removes only a managed workflow", async () => {
   const cwd = await tempRepo();
   try {
-    await setupProject(cwd, { yes: true, actions: true });
-    const result = await setupProject(cwd, { yes: true, actions: false });
+    await setup(cwd, { yes: true, actions: true });
+    const result = await setup(cwd, { yes: true, actions: false });
 
     assert.deepEqual(result.removed, [".github/workflows/codex-cage.yml"]);
     await assert.rejects(
@@ -123,7 +173,7 @@ test("setup refuses to replace an unmanaged workflow", async () => {
     );
 
     await assert.rejects(
-      () => setupProject(cwd, { yes: true, actions: true }),
+      () => setup(cwd, { yes: true, actions: true }),
       /not managed by Codex Cage/,
     );
   } finally {
@@ -134,7 +184,7 @@ test("setup refuses to replace an unmanaged workflow", async () => {
 test("dry-run reports changes without writing files", async () => {
   const cwd = await tempRepo();
   try {
-    const result = await setupProject(cwd, { yes: true, actions: true, dryRun: true });
+    const result = await setup(cwd, { yes: true, actions: true, dryRun: true });
     assert.equal(result.dryRun, true);
     assert.ok(result.created.includes(".codex-cage.yml"));
     await assert.rejects(() => readFile(join(cwd, ".codex-cage.yml"), "utf8"), /ENOENT/);
@@ -160,7 +210,7 @@ test("setup writes local secrets with restricted permissions", async () => {
     close() {},
   };
   try {
-    await setupProject(cwd, {}, prompts);
+    await setup(cwd, {}, prompts);
     const envPath = join(cwd, ".codex-cage.env");
     const content = await readFile(envPath, "utf8");
     const mode = (await stat(envPath)).mode & 0o777;
@@ -192,7 +242,7 @@ test("setup never overwrites existing review policy or env example", async () =>
     ].join("\n");
     await writeFile(join(cwd, ".codex-cage.env.example"), completeExample, "utf8");
 
-    const result = await setupProject(cwd, { yes: true, actions: false });
+    const result = await setup(cwd, { yes: true, actions: false });
 
     assert.equal(
       await readFile(join(cwd, ".codex-cage", "review-policy.md"), "utf8"),
@@ -212,7 +262,7 @@ test("setup never overwrites existing review policy or env example", async () =>
 test("setup dry-run reports scaffold files without writing them", async () => {
   const cwd = await tempRepo();
   try {
-    const result = await setupProject(cwd, { yes: true, actions: false, dryRun: true });
+    const result = await setup(cwd, { yes: true, actions: false, dryRun: true });
 
     assert.ok(result.created.includes(".codex-cage/review-policy.md"));
     assert.ok(result.created.includes(".codex-cage.env.example"));
@@ -234,7 +284,7 @@ test("setup merges missing keys into an existing env example", async () => {
   try {
     await writeFile(join(cwd, ".codex-cage.env.example"), "LINEAR_API_KEY=\n", "utf8");
 
-    await setupProject(cwd, { yes: true, actions: false });
+    await setup(cwd, { yes: true, actions: false });
     const envExample = await readFile(join(cwd, ".codex-cage.env.example"), "utf8");
 
     assert.match(envExample, /LINEAR_API_KEY=/);
@@ -248,7 +298,7 @@ test("setup merges missing keys into an existing env example", async () => {
 test("interactive setup implements with Claude and reviews with Codex by default", async () => {
   const cwd = await tempRepo();
   try {
-    await setupProject(cwd, {}, acceptingPrompts());
+    await setup(cwd, {}, acceptingPrompts());
     const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
       agent: { implement: { provider: string }; review: { provider: string } };
     };
@@ -270,7 +320,7 @@ test("non-interactive setup falls back to Codex without Claude credentials", asy
   const cwd = await tempRepo();
   try {
     await rm(globalEnvPath, { force: true });
-    const result = await setupProject(cwd, { yes: true, actions: false });
+    const result = await setup(cwd, { yes: true, actions: false });
     const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
       agent: { implement: { provider: string } };
     };
@@ -287,7 +337,7 @@ test("non-interactive setup picks Claude when the global file has a Claude token
   try {
     await mkdir(join(configHome, "codex-cage"), { recursive: true });
     await writeFile(globalEnvPath, "CLAUDE_CODE_OAUTH_TOKEN=claude-token\n", "utf8");
-    await setupProject(cwd, { yes: true, actions: false });
+    await setup(cwd, { yes: true, actions: false });
     const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
       agent: { implement: { provider: string } };
     };
@@ -307,7 +357,7 @@ test("setup keeps the agents of an existing config", async () => {
       "verify:\n  - npm test\nagent:\n  model: gpt-5.4\n",
       "utf8",
     );
-    await setupProject(cwd, { yes: true, actions: false });
+    await setup(cwd, { yes: true, actions: false });
 
     assert.match(await readFile(join(cwd, ".codex-cage.yml"), "utf8"), /model: gpt-5\.4/);
     assert.doesNotMatch(await readFile(join(cwd, ".codex-cage.yml"), "utf8"), /claude/);
@@ -334,7 +384,7 @@ test("setup saves agent credentials to the global file and GitHub to the repo", 
   };
   try {
     await rm(globalEnvPath, { force: true });
-    await setupProject(cwd, {}, prompts);
+    await setup(cwd, {}, prompts);
     const globalEnv = await readFile(globalEnvPath, "utf8");
     const repoEnv = await readFile(join(cwd, ".codex-cage.env"), "utf8");
 
@@ -345,6 +395,93 @@ test("setup saves agent credentials to the global file and GitHub to the repo", 
     assert.doesNotMatch(repoEnv, /CLAUDE_CODE_OAUTH_TOKEN/);
   } finally {
     await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup pins the chosen gh account instead of asking for GITHUB_TOKEN", async () => {
+  const cwd = await tempRepo();
+  const inputs: string[] = [];
+  const secrets: string[] = [];
+  const prompts: SetupPrompts = {
+    async input(message, defaultValue) {
+      inputs.push(`${message} [${defaultValue}]`);
+      return message.startsWith("GitHub account") ? "personal" : defaultValue;
+    },
+    async secret(message) {
+      secrets.push(message);
+      return `${message}-value`;
+    },
+    async confirm(message, defaultValue) {
+      if (message.startsWith("Configure local")) return true;
+      if (message.startsWith("Enable GitHub Actions")) return false;
+      return defaultValue;
+    },
+    close() {},
+  };
+  try {
+    const result = await setup(
+      cwd,
+      {},
+      prompts,
+      signedInGh(["personal", "work-account"], "work-account"),
+    );
+    const repoEnv = await readFile(join(cwd, ".codex-cage.env"), "utf8");
+
+    assert.ok(
+      inputs.includes(
+        "GitHub account for this repo (personal, work-account) [work-account]",
+      ),
+    );
+    assert.match(repoEnv, /^CODEX_CAGE_GH_USER=personal$/m);
+    assert.doesNotMatch(repoEnv, /GITHUB_TOKEN/);
+    assert.ok(!secrets.includes("GITHUB_TOKEN"));
+    assert.ok(result.notices.some((notice) => notice.includes("gh account personal")));
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup --yes pins the active gh account", async () => {
+  const cwd = await tempRepo();
+  try {
+    const result = await setup(
+      cwd,
+      { yes: true, actions: false },
+      undefined,
+      signedInGh(["personal", "work-account"], "work-account"),
+    );
+
+    assert.match(
+      await readFile(join(cwd, ".codex-cage.env"), "utf8"),
+      /^CODEX_CAGE_GH_USER=work-account$/m,
+    );
+    assert.ok(result.created.includes(".codex-cage.env"));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup --yes keeps a pinned gh account that is no longer signed in", async () => {
+  const cwd = await tempRepo();
+  try {
+    await writeFile(join(cwd, ".codex-cage.env"), "CODEX_CAGE_GH_USER=gone\n", "utf8");
+    const result = await setup(
+      cwd,
+      { yes: true, actions: false },
+      undefined,
+      signedInGh(["work-account"], "work-account"),
+    );
+
+    assert.equal(
+      await readFile(join(cwd, ".codex-cage.env"), "utf8"),
+      "CODEX_CAGE_GH_USER=gone\n",
+    );
+    assert.ok(
+      result.notices.some((notice) => notice.includes("gh is not signed in as gone")),
+    );
+  } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });

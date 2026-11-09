@@ -16,7 +16,7 @@ Requirements:
 - Docker
 - Git
 - Auth for the configured agents: Claude Code (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`) and Codex (`OPENAI_API_KEY` or host Codex OAuth)
-- `GITHUB_TOKEN` for GitHub issue lookup, clone, push, and PR creation
+- GitHub auth for issue lookup, clone, push, and PR creation: `GITHUB_TOKEN`, or a signed-in GitHub CLI (`gh auth login`)
 
 From this repository:
 
@@ -79,9 +79,13 @@ LINEAR_API_KEY=...
 ```
 
 ```dotenv
-# .codex-cage.env in the target repo
+# .codex-cage.env in the target repo: either a token...
 GITHUB_TOKEN=...
+# ...or the gh account to take a token from (`gh auth token --user`)
+CODEX_CAGE_GH_USER=your-login
 ```
+
+With several `gh` accounts signed in, setup asks which one this repo uses and saves it as `CODEX_CAGE_GH_USER`.
 
 Run a GitHub issue:
 

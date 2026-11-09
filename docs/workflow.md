@@ -64,11 +64,19 @@ OPENAI_API_KEY=...
 LINEAR_API_KEY=...
 ```
 
-GitHub credentials stay per repo in `.codex-cage.env` in the host repo where you run Codex Cage, so one repo never uses another repo's account:
+GitHub credentials stay per repo in `.codex-cage.env` in the host repo where you run Codex Cage, so one repo never uses another repo's account. Either set a token:
 
 ```dotenv
 GITHUB_TOKEN=...
 ```
+
+or pin a GitHub CLI account. When `GITHUB_TOKEN` is empty, runs call `gh auth token --hostname github.com --user <login>` at start; without a pin they use gh's active account:
+
+```dotenv
+CODEX_CAGE_GH_USER=your-login
+```
+
+`codex-cage setup` writes the pin when gh is signed in: one account is used directly, several are offered as a choice (`--yes` takes the active one). Setup also runs its `gh label`/`gh secret` commands as that account. A pinned account that is no longer signed in fails the run instead of falling back to another account; `codex-cage doctor` reports which account local runs use. The gh token carries the scopes of your `gh auth login` session rather than the fine-grained permissions below.
 
 Values in the repo's `.codex-cage.env` override the global file key by key; empty placeholders are ignored. The global file only supplies `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, and `LINEAR_API_KEY`; `codex-cage doctor` warns about anything else in it. Each agent receives only its own provider's credentials.
 
