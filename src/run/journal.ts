@@ -562,6 +562,10 @@ function summarizeCommand(command: string): string {
     return "codex exec";
   }
 
+  if (command.includes("claude -p")) {
+    return "claude -p";
+  }
+
   const toolCommand = command.match(/^'(git|gh)'\s+'([^']+)'/);
   if (toolCommand?.[1] !== undefined && toolCommand[2] !== undefined) {
     return `${toolCommand[1]} ${toolCommand[2]}`;

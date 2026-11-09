@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { doctorProject, type DoctorCommandRunner } from "../src/doctor.js";
 import { GENERATED_WORKFLOW_MARKER } from "../src/setup.js";
+
+// Doctor reads the machine-wide credential file; isolate it per test process.
+const configHome = await mkdtemp(join(tmpdir(), "codex-cage-config-"));
+process.env.XDG_CONFIG_HOME = configHome;
+const globalEnvPath = join(configHome, "codex-cage", "env");
+
+const quietRunner: DoctorCommandRunner = async () => ({
+  exitCode: 0,
+  stdout: "true",
+  stderr: "",
+});
 
 test("doctor reports missing configuration", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
@@ -94,6 +105,67 @@ test("doctor checks local requirements without requiring Actions", async () => {
       ),
     );
   } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor checks Claude credentials when Claude implements", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  try {
+    await writeFile(
+      join(cwd, ".codex-cage.yml"),
+      "verify:\n  - npm test\nagent:\n  implement:\n    provider: claude\n",
+      "utf8",
+    );
+    const missing = await doctorProject(cwd, quietRunner);
+    assert.ok(
+      missing.checks.some(
+        (check) => check.name === "claude-auth" && check.status === "warning",
+      ),
+    );
+
+    await mkdir(join(configHome, "codex-cage"), { recursive: true });
+    await writeFile(globalEnvPath, "CLAUDE_CODE_OAUTH_TOKEN=claude-token\n", {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    const present = await doctorProject(cwd, quietRunner);
+    assert.ok(
+      present.checks.some(
+        (check) => check.name === "claude-auth" && check.status === "pass",
+      ),
+    );
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor warns about GitHub credentials and loose permissions in the global file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  try {
+    await writeFile(join(cwd, ".codex-cage.yml"), "verify:\n  - npm test\n", "utf8");
+    await mkdir(join(configHome, "codex-cage"), { recursive: true });
+    await writeFile(globalEnvPath, "GITHUB_TOKEN=github-token\n", {
+      encoding: "utf8",
+      mode: 0o644,
+    });
+    await chmod(globalEnvPath, 0o644);
+
+    const result = await doctorProject(cwd, quietRunner);
+    const messages = result.checks
+      .filter((check) => check.name === "global-credentials")
+      .map((check) => check.message);
+
+    assert.ok(messages.some((message) => message.includes("readable by other users")));
+    assert.ok(messages.some((message) => message.includes("ignored GITHUB_TOKEN")));
+    assert.ok(
+      result.checks.some(
+        (check) => check.name === "github-auth" && check.status === "warning",
+      ),
+    );
+  } finally {
+    await rm(globalEnvPath, { force: true });
     await rm(cwd, { recursive: true, force: true });
   }
 });

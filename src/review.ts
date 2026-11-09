@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execa } from "execa";
 import { z } from "zod";
+import { claudeOptionArgs, extractClaudeResult } from "./agent/claude.js";
+import type { AgentAssignment } from "./agent/providers.js";
 
 export type ReviewFindingSeverity = "blocking" | "non_blocking";
 
@@ -26,7 +28,7 @@ export type ReviewNextAction =
 
 export type ReviewAgentRunInput = {
   cwd: string;
-  model: string;
+  agent: AgentAssignment;
   prompt: string;
   outputSchema: Record<string, unknown>;
   env?: Record<string, string> | undefined;
@@ -46,7 +48,7 @@ export type BuildReviewPromptInput = {
 
 export type RunIndependentReviewInput = BuildReviewPromptInput & {
   cwd: string;
-  model: string;
+  agent: AgentAssignment;
   cycle: number;
   maxReviewCycles: number;
   readCurrentDiff: () => Promise<string>;
@@ -158,40 +160,72 @@ export const reviewReportJsonSchema = {
 
 export const execaReviewAgentRunner: ReviewAgentRunner = {
   async run(input: ReviewAgentRunInput): Promise<string> {
-    const tempDirectory = await mkdtemp(join(tmpdir(), "codex-cage-review-"));
-    const outputSchemaPath = join(tempDirectory, "review-output-schema.json");
-
-    try {
-      await writeFile(
-        outputSchemaPath,
-        `${JSON.stringify(input.outputSchema, null, 2)}\n`,
-        "utf8",
-      );
-      const args = [
-        "exec",
-        "--model",
-        input.model,
-        "--sandbox",
-        "read-only",
-        "--cd",
-        input.cwd,
-        "--output-schema",
-        outputSchemaPath,
-        input.prompt,
-      ];
-
-      if (input.env === undefined) {
-        const result = await execa("codex", args);
-        return result.stdout;
+    switch (input.agent.provider) {
+      case "codex":
+        return await runCodexReviewOnHost(input);
+      case "claude":
+        return await runClaudeReviewOnHost(input);
+      default: {
+        const exhaustiveProvider: never = input.agent.provider;
+        return exhaustiveProvider;
       }
-
-      const result = await execa("codex", args, { env: input.env });
-      return result.stdout;
-    } finally {
-      await rm(tempDirectory, { recursive: true, force: true });
     }
   },
 };
+
+async function runCodexReviewOnHost(input: ReviewAgentRunInput): Promise<string> {
+  const tempDirectory = await mkdtemp(join(tmpdir(), "codex-cage-review-"));
+  const outputSchemaPath = join(tempDirectory, "review-output-schema.json");
+
+  try {
+    await writeFile(
+      outputSchemaPath,
+      `${JSON.stringify(input.outputSchema, null, 2)}\n`,
+      "utf8",
+    );
+    const args = [
+      "exec",
+      "--model",
+      input.agent.model,
+      "--sandbox",
+      "read-only",
+      "--cd",
+      input.cwd,
+      "--output-schema",
+      outputSchemaPath,
+      input.prompt,
+    ];
+
+    if (input.env === undefined) {
+      const result = await execa("codex", args);
+      return result.stdout;
+    }
+
+    const result = await execa("codex", args, { env: input.env });
+    return result.stdout;
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}
+
+async function runClaudeReviewOnHost(input: ReviewAgentRunInput): Promise<string> {
+  const args = [
+    "-p",
+    input.prompt,
+    ...claudeOptionArgs({
+      access: "read-only",
+      model: input.agent.model,
+      prompt: input.prompt,
+      outputSchema: input.outputSchema,
+    }),
+  ];
+  const result = await execa("claude", args, {
+    cwd: input.cwd,
+    env: { ...input.env, DISABLE_AUTOUPDATER: "1" },
+  });
+
+  return extractClaudeResult(result.stdout);
+}
 
 export async function runIndependentReview(
   input: RunIndependentReviewInput,
@@ -200,7 +234,7 @@ export async function runIndependentReview(
   const prompt = buildReviewPrompt(input);
   const output = await runner.run({
     cwd: input.cwd,
-    model: input.model,
+    agent: input.agent,
     prompt,
     outputSchema: reviewReportJsonSchema,
     env: input.env,

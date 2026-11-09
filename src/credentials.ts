@@ -1,4 +1,12 @@
-import { createSecretRedactor } from "./guards.js";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import {
+  agentCredentialEnvNames,
+  agentProvidersInUse,
+  type AgentProvider,
+  type AgentRole,
+} from "./agent/providers.js";
+import { createSecretRedactor, readCodexCageEnv, readEnvFile } from "./guards.js";
 import type { CommentSelection, FetchIssueContextOptions } from "./issue.js";
 
 export type CommandCredentialIntent =
@@ -9,8 +17,11 @@ export type CommandCredentialIntent =
   | "review"
   | "publish";
 
+export type AgentProviderByRole = Record<AgentRole, AgentProvider>;
+
 export type CredentialPolicyInput = {
   env: Record<string, string>;
+  agents: AgentProviderByRole;
   codexAuthFilePath?: string | null | undefined;
 };
 
@@ -21,6 +32,7 @@ export type CommandCredentials = {
 
 export type RunCredentialsInput = {
   cwd: string;
+  agents: AgentProviderByRole;
   readEnv: (cwd: string) => Promise<Record<string, string>>;
   findCodexAuthFile: () => Promise<string | null>;
 };
@@ -28,13 +40,17 @@ export type RunCredentialsInput = {
 export class RunCredentials {
   readonly secrets: Record<string, string>;
 
+  readonly #agents: AgentProviderByRole;
+
   readonly #codexAuthFilePath: string | null;
 
   constructor(input: {
     secrets: Record<string, string>;
+    agents: AgentProviderByRole;
     codexAuthFilePath: string | null;
   }) {
     this.secrets = input.secrets;
+    this.#agents = input.agents;
     this.#codexAuthFilePath = input.codexAuthFilePath;
   }
 
@@ -61,6 +77,7 @@ export class RunCredentials {
   command(intent: CommandCredentialIntent): CommandCredentials {
     return credentialsForCommand(intent, {
       env: this.secrets,
+      agents: this.#agents,
       codexAuthFilePath: this.#codexAuthFilePath,
     });
   }
@@ -74,18 +91,21 @@ export class RunCredentials {
   }
 }
 
-const codexEnvNames = new Set(["OPENAI_API_KEY"]);
-const githubEnvNames = new Set(["GITHUB_TOKEN", "GH_TOKEN"]);
-const issueTrackerEnvNames = new Set(["LINEAR_API_KEY"]);
+const codexEnvNames: ReadonlySet<string> = new Set(agentCredentialEnvNames.codex);
+const claudeEnvNames: ReadonlySet<string> = new Set(agentCredentialEnvNames.claude);
+const githubEnvNames: ReadonlySet<string> = new Set(["GITHUB_TOKEN", "GH_TOKEN"]);
+const issueTrackerEnvNames: ReadonlySet<string> = new Set(["LINEAR_API_KEY"]);
 
 export async function prepareRunCredentials(
   input: RunCredentialsInput,
 ): Promise<RunCredentials> {
   const secrets = normalizeCredentialEnv(await input.readEnv(input.cwd));
-  const codexAuthFilePath =
-    secrets.OPENAI_API_KEY === undefined ? await input.findCodexAuthFile() : null;
+  const needsCodexAuthFile =
+    agentProvidersInUse(input.agents).has("codex") &&
+    secrets.OPENAI_API_KEY === undefined;
+  const codexAuthFilePath = needsCodexAuthFile ? await input.findCodexAuthFile() : null;
 
-  return new RunCredentials({ secrets, codexAuthFilePath });
+  return new RunCredentials({ secrets, agents: input.agents, codexAuthFilePath });
 }
 
 export function normalizeCredentialEnv(
@@ -112,7 +132,7 @@ export function credentialsForCommand(
   switch (intent) {
     case "implement":
     case "review":
-      return codexCredentials(input);
+      return agentCredentials(input.agents[intent], input);
     case "publish":
       return { env: pickEnv(input.env, githubEnvNames) };
     case "clone":
@@ -131,6 +151,116 @@ export function issueCredentialEnv(env: Record<string, string>): Record<string, 
   return pickEnv(env, new Set([...githubEnvNames, ...issueTrackerEnvNames]));
 }
 
+export function hasAgentCredentials(
+  provider: AgentProvider,
+  input: { env: Record<string, string>; codexAuthFileAvailable: boolean },
+): boolean {
+  switch (provider) {
+    case "codex":
+      return input.env.OPENAI_API_KEY !== undefined || input.codexAuthFileAvailable;
+    case "claude":
+      return agentCredentialEnvNames.claude.some((name) => input.env[name] !== undefined);
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
+/**
+ * Credentials that may live in the machine-wide file. GitHub credentials stay
+ * per repo so one repo never silently uses another repo's account.
+ */
+export const globalCredentialNames = [
+  ...agentCredentialEnvNames.codex,
+  ...agentCredentialEnvNames.claude,
+  "LINEAR_API_KEY",
+] as const;
+
+export type CredentialSource = "repo" | "global";
+
+export type CredentialEnv = {
+  env: Record<string, string>;
+  sources: Record<string, CredentialSource>;
+  ignoredGlobalNames: string[];
+};
+
+export function globalCredentialsPath(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): string {
+  const configHome =
+    env.XDG_CONFIG_HOME === undefined || env.XDG_CONFIG_HOME === ""
+      ? join(homedir(), ".config")
+      : env.XDG_CONFIG_HOME;
+
+  return join(configHome, "codex-cage", "env");
+}
+
+/**
+ * Merges the machine-wide credential file with the repo's `.codex-cage.env`.
+ * Repo values win per key, and empty placeholders never mask a global value.
+ */
+export function mergeCredentialEnv(input: {
+  global: Record<string, string>;
+  repo: Record<string, string>;
+}): CredentialEnv {
+  const allowedGlobalNames: ReadonlySet<string> = new Set(globalCredentialNames);
+  const env: Record<string, string> = {};
+  const sources: Record<string, CredentialSource> = {};
+  const ignoredGlobalNames: string[] = [];
+
+  for (const [name, value] of Object.entries(input.global)) {
+    if (!allowedGlobalNames.has(name)) {
+      ignoredGlobalNames.push(name);
+      continue;
+    }
+    if (value.trim() === "") continue;
+    env[name] = value;
+    sources[name] = "global";
+  }
+
+  for (const [name, value] of Object.entries(input.repo)) {
+    if (value.trim() === "") continue;
+    env[name] = value;
+    sources[name] = "repo";
+  }
+
+  return { env, sources, ignoredGlobalNames };
+}
+
+export async function readCredentialEnv(
+  cwd: string,
+  globalPath: string = globalCredentialsPath(),
+): Promise<CredentialEnv> {
+  const [global, repo] = await Promise.all([
+    readEnvFile(globalPath),
+    readCodexCageEnv(cwd),
+  ]);
+
+  return mergeCredentialEnv({ global, repo });
+}
+
+/** Default run env: repo `.codex-cage.env` layered over the global file. */
+export async function readRunEnv(cwd: string): Promise<Record<string, string>> {
+  return (await readCredentialEnv(cwd)).env;
+}
+
+function agentCredentials(
+  provider: AgentProvider,
+  input: CredentialPolicyInput,
+): CommandCredentials {
+  switch (provider) {
+    case "codex":
+      return codexCredentials(input);
+    case "claude":
+      return { env: pickEnv(input.env, claudeEnvNames) };
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
 function codexCredentials(input: CredentialPolicyInput): CommandCredentials {
   const env = pickEnv(input.env, codexEnvNames);
 
@@ -147,6 +277,7 @@ function codexCredentials(input: CredentialPolicyInput): CommandCredentials {
 function nonCredentialEnv(env: Record<string, string>): Record<string, string> {
   const credentialNames = new Set([
     ...codexEnvNames,
+    ...claudeEnvNames,
     ...githubEnvNames,
     ...issueTrackerEnvNames,
   ]);

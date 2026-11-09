@@ -11,6 +11,9 @@ import {
 } from "./docker.js";
 import type { CommandResult, CommandRunOptions, CommandRunner } from "./publish.js";
 import type { ReviewAgentRunner } from "./review.js";
+import { agentShellCommand, extractAgentResult } from "./agent/providers.js";
+import type { ExecutionMode } from "./config.js";
+import { shellQuote } from "./shell.js";
 import { RunFailureError } from "./run/errors.js";
 
 export type ShellRunner = {
@@ -318,23 +321,17 @@ export function createGhCommandRunner(
 
 export function createReviewAgentRunner(
   shell: ShellRunner,
-  options?: DockerCommandOptions,
-  bypassSandbox?: boolean,
+  options: DockerCommandOptions | undefined,
+  executionMode: ExecutionMode,
 ): ReviewAgentRunner {
   return {
     async run(input): Promise<string> {
-      const outputSchemaPath = "/tmp/codex-cage-review-output-schema.json";
-      const writeOutputSchemaCommand = `printf %s ${shellQuote(
-        JSON.stringify(input.outputSchema),
-      )} > ${shellQuote(outputSchemaPath)}`;
-
-      const command = `${writeOutputSchemaCommand} && ${codexExecCommand({
-        model: input.model,
-        sandbox: "read-only",
-        outputSchemaPath,
+      const command = agentShellCommand(input.agent, {
+        access: "read-only",
         prompt: input.prompt,
-        bypassSandbox,
-      })}`;
+        executionMode,
+        outputSchema: input.outputSchema,
+      });
       const result = await shell.run(command, options);
 
       if (result.exitCode !== 0) {
@@ -344,38 +341,9 @@ export function createReviewAgentRunner(
         throw new Error(formatCommandLog(command, result));
       }
 
-      return result.stdout;
+      return extractAgentResult(input.agent.provider, result.stdout);
     },
   };
-}
-
-export function codexExecCommand(input: {
-  model: string;
-  sandbox: "read-only" | "workspace-write";
-  outputSchemaPath?: string | undefined;
-  prompt: string;
-  bypassSandbox?: boolean | undefined;
-}): string {
-  const args = ["codex exec", "--model", shellQuote(input.model)];
-
-  if (input.bypassSandbox === true) {
-    // Direct mode runs on an already-isolated, ephemeral runner where Codex's
-    // own bubblewrap sandbox cannot create network namespaces
-    // ("bwrap: loopback: ... Operation not permitted"). Skip Codex's sandbox
-    // and rely on the runner's isolation. Only safe because the host is
-    // externally sandboxed.
-    args.push("--dangerously-bypass-approvals-and-sandbox");
-  } else {
-    args.push("--sandbox", shellQuote(input.sandbox));
-  }
-
-  if (input.outputSchemaPath !== undefined) {
-    args.push("--output-schema", shellQuote(input.outputSchemaPath));
-  }
-
-  args.push(shellQuote(input.prompt));
-
-  return args.join(" ");
 }
 
 export function formatCommandLog(command: string, result: CommandResult): string {
@@ -387,10 +355,6 @@ export function formatCommandLog(command: string, result: CommandResult): string
   ]
     .filter((line) => line !== "")
     .join("\n");
-}
-
-export function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 export function hostCommandWithCodexAuth(

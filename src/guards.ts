@@ -56,8 +56,12 @@ const tokenPatterns = [
     pattern: /(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/,
   },
   {
+    name: "anthropic_api_key",
+    pattern: /sk-ant-[A-Za-z0-9_-]{20,}/,
+  },
+  {
     name: "openai_api_key",
-    pattern: /sk-[A-Za-z0-9_-]{20,}/,
+    pattern: /sk-(?!ant-)[A-Za-z0-9_-]{20,}/,
   },
   {
     name: "aws_access_key_id",
@@ -73,8 +77,11 @@ export async function readCodexCageEnv(
   cwd: string,
   relativePath = envFilePath,
 ): Promise<Record<string, string>> {
-  const path = join(cwd, relativePath);
+  return await readEnvFile(join(cwd, relativePath));
+}
 
+/** Reads a dotenv-style file; a missing file is an empty env. */
+export async function readEnvFile(path: string): Promise<Record<string, string>> {
   try {
     return parseEnvFile(await readFile(path, "utf8"));
   } catch (error) {

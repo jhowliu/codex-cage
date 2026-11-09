@@ -1,5 +1,32 @@
 import { z } from "zod";
+import {
+  agentProviders,
+  defaultAgentModels,
+  type AgentAssignment,
+} from "./agent/providers.js";
 import { defaultSandboxImage } from "./docker.js";
+
+const agentAssignmentSchema = z.object({
+  provider: z.enum(agentProviders),
+  model: z.string().min(1).optional(),
+});
+
+/**
+ * Resolves one agent role. An unconfigured role keeps the original Codex-only
+ * behavior; the legacy `agent.model` only ever names a Codex model.
+ */
+function resolveAgentAssignment(
+  assignment: z.infer<typeof agentAssignmentSchema> | undefined,
+  legacyCodexModel: string | undefined,
+): AgentAssignment {
+  const provider = assignment?.provider ?? "codex";
+  const model =
+    assignment?.model ??
+    (provider === "codex" ? legacyCodexModel : undefined) ??
+    defaultAgentModels[provider];
+
+  return { provider, model };
+}
 
 const actionsRuntimeSchema = z.object({
   image: z.string().min(1),
@@ -33,15 +60,21 @@ export const codexCageConfigSchema = z
       .default(() => ({ image: defaultSandboxImage, dockerfile: null })),
     agent: z
       .object({
-        model: z.string().default("gpt-5.4-mini"),
+        // Legacy single-agent setting: the Codex model for any role that is
+        // not configured explicitly.
+        model: z.string().min(1).optional(),
+        implement: agentAssignmentSchema.optional(),
+        review: agentAssignmentSchema.optional(),
         max_iterations: z.number().int().positive().default(5),
         max_review_cycles: z.number().int().nonnegative().default(2),
       })
-      .default(() => ({
-        model: "gpt-5.4-mini",
-        max_iterations: 5,
-        max_review_cycles: 2,
-      })),
+      .transform((agent) => ({
+        implement: resolveAgentAssignment(agent.implement, agent.model),
+        review: resolveAgentAssignment(agent.review, agent.model),
+        max_iterations: agent.max_iterations,
+        max_review_cycles: agent.max_review_cycles,
+      }))
+      .default({}),
     timeouts: z
       .object({
         total_minutes: z.number().int().positive().default(90),

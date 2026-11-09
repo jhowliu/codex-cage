@@ -1,3 +1,4 @@
+import type { AgentProvider } from "../agent/providers.js";
 import type { IssueContext } from "../issue.js";
 import type { RuntimeContext } from "../run-workflow.js";
 
@@ -17,7 +18,7 @@ Rules:
 - Work only in this repository.
 - Do not commit, push, create pull requests, or write secrets.
 - Run only commands needed to implement the issue; Codex Cage will run verification separately.
-- Follow applicable native Codex AGENTS.md files discovered in this repository.
+- ${agentInstructionFilesRule(input.context.agents.implement.provider)}
 - If the issue lacks enough detail to implement safely, stop and explain the blocker.
 
 Iteration: ${input.iteration}
@@ -30,6 +31,21 @@ ${formatIssueContext(input.context.issue)}
 Feedback to address:
 ${feedback}
 `;
+}
+
+function agentInstructionFilesRule(provider: AgentProvider): string {
+  switch (provider) {
+    case "codex":
+      return "Follow applicable native Codex AGENTS.md files discovered in this repository.";
+    case "claude":
+      // Claude Code's native memory is CLAUDE.md; name AGENTS.md explicitly so
+      // repos that only document conventions there are still followed.
+      return "Before editing, read and follow the AGENTS.md and CLAUDE.md files that apply to the paths you change.";
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
 }
 
 export function formatReviewIssueContext(context: RuntimeContext): string {

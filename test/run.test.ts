@@ -477,7 +477,7 @@ verify:
           reviewEnv = input.env;
           await input.runner?.run({
             cwd: input.cwd,
-            model: input.model,
+            agent: input.agent,
             prompt: "review",
             outputSchema: { type: "object" },
           });
@@ -1378,3 +1378,105 @@ for (const scenario of replayableFailureScenarios) {
     }
   });
 }
+
+test("runCodexCage implements with Claude and reviews with Codex using scoped credentials", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+agent:
+  implement:
+    provider: claude
+  review:
+    provider: codex
+`);
+  const events: string[] = [];
+  const diff = `diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`;
+  const shell = shellRunner(
+    new Map([
+      ["git fetch origin", commandResult()],
+      [
+        "claude -p",
+        commandResult(
+          `${JSON.stringify({ type: "result", is_error: false, result: "implemented" })}\n`,
+        ),
+      ],
+      [
+        "codex exec",
+        commandResult(
+          JSON.stringify({ decision: "pass", summary: "Looks good.", findings: [] }),
+        ),
+      ],
+      ["npm test", commandResult("tests passed")],
+      ["git add --intent-to-add", commandResult(diff)],
+    ]),
+  );
+
+  try {
+    const result = await runCodexCage(
+      { cwd, issueUrl: issue.url, model: "claude-sonnet-5-5" },
+      {
+        executionMode: "docker",
+        generateRunId: () => "run-claude-123",
+        readEnv: async () => ({
+          GITHUB_TOKEN: "token-value",
+          OPENAI_API_KEY: "openai-value",
+          CLAUDE_CODE_OAUTH_TOKEN: "claude-value",
+        }),
+        findCodexAuthFile: async () => {
+          throw new Error("OAuth lookup should not be used.");
+        },
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+        publishSuccessfulRun: async (input) => ({
+          branchName: input.branchName ?? "codex-cage/gh-26-run-claude",
+          commitMessage: "#26 Wire run command",
+          prTitle: "#26 Wire run command",
+          prBody: "body",
+          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+        }),
+      },
+    );
+
+    assert.equal(result.status, "succeeded");
+
+    const implementIndex = shell.commands.findIndex((command) =>
+      command.includes("claude -p"),
+    );
+    const reviewIndex = shell.commands.findIndex((command) =>
+      command.includes("codex exec"),
+    );
+    // --model overrides only the implementation agent.
+    assert.match(shell.commands[implementIndex] ?? "", /'--model' 'claude-sonnet-5-5'/);
+    assert.match(
+      shell.commands[implementIndex] ?? "",
+      /'--dangerously-skip-permissions'/,
+    );
+    assert.deepEqual(shell.commandOptions[implementIndex], {
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "claude-value" },
+    });
+    assert.match(shell.commands[reviewIndex] ?? "", /--model 'gpt-5\.4-mini'/);
+    assert.match(shell.commands[reviewIndex] ?? "", /--sandbox 'read-only'/);
+    assert.deepEqual(shell.commandOptions[reviewIndex], {
+      env: { OPENAI_API_KEY: "openai-value" },
+    });
+
+    const implementationPrompt = await readFile(
+      join(cwd, ".codex-cage", "runs", "run-claude-123", "implementation-prompt-1.md"),
+      "utf8",
+    );
+    assert.match(implementationPrompt, /AGENTS\.md and CLAUDE\.md/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

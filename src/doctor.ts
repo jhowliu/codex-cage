@@ -1,11 +1,20 @@
 import { execa } from "execa";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { agentProvidersInUse, type AgentProvider } from "./agent/providers.js";
 import type { CodexCageConfig } from "./config.js";
 import { loadCodexCageConfigFile } from "./config-file.js";
-import { readCodexCageEnv } from "./guards.js";
+import {
+  globalCredentialNames,
+  globalCredentialsPath,
+  hasAgentCredentials,
+  readCredentialEnv,
+  type AgentProviderByRole,
+  type CredentialEnv,
+} from "./credentials.js";
+import { requiredActionsSecretGroups } from "./github-actions.js";
 import { GENERATED_WORKFLOW_MARKER } from "./setup.js";
 
 export type DoctorCheck =
@@ -70,18 +79,23 @@ export async function doctorProject(
       : warning("docker", "Docker is unavailable; local runs will not work."),
   );
 
-  const env = await readCodexCageEnv(cwd);
-  const hasCodexAuth =
-    env.OPENAI_API_KEY !== undefined ||
-    (await readable(join(homedir(), ".codex", "auth.json")));
-  checks.push(
-    hasCodexAuth
-      ? pass("codex-auth", "Codex authentication is available locally.")
-      : warning(
-          "codex-auth",
-          "Set OPENAI_API_KEY in .codex-cage.env or sign in with Codex CLI.",
-        ),
-  );
+  const agents: AgentProviderByRole = {
+    implement: configState.config.agent.implement.provider,
+    review: configState.config.agent.review.provider,
+  };
+  const globalPath = globalCredentialsPath();
+  const credentialEnv = await readCredentialEnv(cwd, globalPath);
+  const env = credentialEnv.env;
+  checks.push(...(await globalCredentialsChecks(globalPath, credentialEnv)));
+  const codexAuthFileAvailable = await readable(join(homedir(), ".codex", "auth.json"));
+  for (const provider of agentProvidersInUse(agents)) {
+    checks.push(
+      agentAuthCheck(provider, {
+        available: hasAgentCredentials(provider, { env, codexAuthFileAvailable }),
+        globalPath,
+      }),
+    );
+  }
   checks.push(
     env.GITHUB_TOKEN !== undefined || env.GH_TOKEN !== undefined
       ? pass("github-auth", "GitHub authentication is available locally.")
@@ -89,7 +103,7 @@ export async function doctorProject(
   );
 
   if (configState.config.actions.enabled) {
-    await checkActions(cwd, configState.config.actions, checks, runCommand);
+    await checkActions(cwd, configState.config.actions, agents, checks, runCommand);
   } else {
     checks.push(pass("github-actions", "GitHub Actions automation is disabled."));
   }
@@ -97,9 +111,73 @@ export async function doctorProject(
   return result(checks);
 }
 
+function agentAuthCheck(
+  provider: AgentProvider,
+  input: { available: boolean; globalPath: string },
+): DoctorCheck {
+  switch (provider) {
+    case "codex":
+      return input.available
+        ? pass("codex-auth", "Codex authentication is available locally.")
+        : warning(
+            "codex-auth",
+            `Set OPENAI_API_KEY in ${input.globalPath} or sign in with Codex CLI.`,
+          );
+    case "claude":
+      return input.available
+        ? pass("claude-auth", "Claude Code authentication is available locally.")
+        : warning(
+            "claude-auth",
+            `Run \`claude setup-token\` and set CLAUDE_CODE_OAUTH_TOKEN (or ANTHROPIC_API_KEY) in ${input.globalPath}.`,
+          );
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
+async function globalCredentialsChecks(
+  path: string,
+  credentialEnv: CredentialEnv,
+): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
+  const mode = await fileMode(path);
+
+  if (mode !== null && (mode & 0o077) !== 0) {
+    checks.push(
+      warning(
+        "global-credentials",
+        `${path} is readable by other users; run \`chmod 600 ${path}\`.`,
+      ),
+    );
+  }
+
+  if (credentialEnv.ignoredGlobalNames.length > 0) {
+    checks.push(
+      warning(
+        "global-credentials",
+        `${path} only supplies ${globalCredentialNames.join(", ")}; ignored ${credentialEnv.ignoredGlobalNames.join(", ")}. Keep GitHub credentials in each repo's .codex-cage.env.`,
+      ),
+    );
+  }
+
+  return checks;
+}
+
+async function fileMode(path: string): Promise<number | null> {
+  try {
+    return (await stat(path)).mode & 0o777;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function checkActions(
   cwd: string,
   actions: CodexCageConfig["actions"],
+  agents: AgentProviderByRole,
   checks: DoctorCheck[],
   runCommand: DoctorCommandRunner,
 ): Promise<void> {
@@ -123,11 +201,13 @@ async function checkActions(
   const secrets = await runCommand("gh", ["secret", "list", "--json", "name"], cwd);
   if (secrets.exitCode === 0) {
     const names = parseNameList(secrets.stdout);
-    for (const name of ["OPENAI_API_KEY", "CODEX_CAGE_GITHUB_TOKEN"]) {
+    for (const group of requiredActionsSecretGroups(agents)) {
+      const label = group.join(" or ");
+      const configured = group.find((name) => names.has(name));
       checks.push(
-        names.has(name)
-          ? pass(`secret:${name}`, `${name} is configured.`)
-          : fail(`secret:${name}`, `${name} is missing from Actions secrets.`),
+        configured !== undefined
+          ? pass(`secret:${group[0]}`, `${configured} is configured.`)
+          : fail(`secret:${group[0]}`, `${label} is missing from Actions secrets.`),
       );
     }
   } else {

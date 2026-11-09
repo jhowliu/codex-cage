@@ -1,6 +1,7 @@
 FROM node:22-bookworm
 
 ARG CODEX_CLI_VERSION=0.125.0
+ARG CLAUDE_CODE_VERSION=2.1.319
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
@@ -20,7 +21,9 @@ RUN apt-get update \
   && apt-get update \
   && apt-get install -y --no-install-recommends gh \
   && apt-get purge -y --auto-remove gnupg \
-  && npm install -g "@openai/codex@${CODEX_CLI_VERSION}" \
+  && npm install -g \
+    "@openai/codex@${CODEX_CLI_VERSION}" \
+    "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force \
   && groupadd --gid 10001 agent \
   && useradd --uid 10001 --gid 10001 --create-home --shell /bin/bash agent \

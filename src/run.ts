@@ -3,6 +3,7 @@ import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
+import type { AgentAssignments } from "./agent/providers.js";
 import type { createComposeProject } from "./compose.js";
 import {
   parseCodexCageConfig,
@@ -10,13 +11,12 @@ import {
   type CodexCageConfig,
   type ExecutionMode,
 } from "./config.js";
-import { prepareRunCredentials } from "./credentials.js";
+import { prepareRunCredentials, readRunEnv } from "./credentials.js";
 import {
   type buildRuntimeImage,
   type DockerSandbox,
   type DockerSandboxOptions,
 } from "./docker.js";
-import { readCodexCageEnv } from "./guards.js";
 import { fetchIssueContext } from "./issue.js";
 import { generateBranchName, type publishSuccessfulRun } from "./publish.js";
 import { buildPromptContext } from "./prompt-context.js";
@@ -51,7 +51,7 @@ export type RunCodexCageDependencies = {
   fetchIssueContext?: typeof fetchIssueContext;
   resolveTargetRepo?: typeof resolveTargetRepo;
   createAuthenticatedRepo?: typeof createAuthenticatedRepo;
-  readEnv?: typeof readCodexCageEnv;
+  readEnv?: (cwd: string) => Promise<Record<string, string>>;
   openRunStore?: typeof openRunStore;
   createDockerSandbox?: (options: DockerSandboxOptions) => DockerSandbox;
   buildRuntimeImage?: typeof buildRuntimeImage;
@@ -128,14 +128,23 @@ async function prepareRuntimeContext(
   dependencies: RunCodexCageDependencies,
 ): Promise<RuntimeContext> {
   const configResult = await readConfig(cwd);
-  const readEnv = dependencies.readEnv ?? readCodexCageEnv;
+  const readEnv = dependencies.readEnv ?? readRunEnv;
   const fetchContext = dependencies.fetchIssueContext ?? fetchIssueContext;
   const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
   const authenticateRepo =
     dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
   const locateCodexAuthFile = dependencies.findCodexAuthFile ?? findCodexAuthFile;
+  const agentConfig = configResult.config.agent;
+  const agents: AgentAssignments = {
+    implement: {
+      provider: agentConfig.implement.provider,
+      model: options.model ?? agentConfig.implement.model,
+    },
+    review: agentConfig.review,
+  };
   const credentials = await prepareRunCredentials({
     cwd,
+    agents: { implement: agents.implement.provider, review: agents.review.provider },
     readEnv,
     findCodexAuthFile: locateCodexAuthFile,
   });
@@ -158,7 +167,6 @@ async function prepareRuntimeContext(
     credentials.githubToken(),
   );
   const baseBranch = options.base ?? configResult.config.git.base;
-  const model = options.model ?? configResult.config.agent.model;
   const draft = options.draft ?? configResult.config.pr.draft;
   const runId = options.runId ?? dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
@@ -185,7 +193,7 @@ async function prepareRuntimeContext(
     repoResolution,
     authenticatedRepo,
     baseBranch,
-    model,
+    agents,
     draft,
     runId,
     branchName,

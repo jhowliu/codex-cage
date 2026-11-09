@@ -60,7 +60,7 @@ test("generates a parseable issue-label and dispatch workflow for the target che
     uses: "actions/checkout@v4",
   });
   assert.equal(
-    step(workflow, "Install Codex Cage and Codex CLI").run,
+    step(workflow, "Install Codex Cage and agent CLIs").run,
     'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@openai/codex@0.125.0"',
   );
 });
@@ -158,4 +158,36 @@ test("rejects versions that are not exact", () => {
     () => generateGitHubActionsWorkflow({ codexCageVersion: "^1.2.3" }),
     /exact semantic version/,
   );
+});
+
+test("installs and authenticates only the configured agent CLIs", () => {
+  const { workflow } = generate({ agents: { implement: "claude", review: "codex" } });
+  const validate = step(workflow, "Validate credentials");
+  const credentialStep = step(workflow, "Write Codex Cage credentials");
+
+  assert.equal(
+    step(workflow, "Install Codex Cage and agent CLIs").run,
+    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@anthropic-ai/claude-code@2.1.319" "@openai/codex@0.125.0"',
+  );
+  assert.match(validate.run ?? "", /CLAUDE_CODE_OAUTH_TOKEN.*ANTHROPIC_API_KEY/);
+  assert.match(validate.run ?? "", /Missing OPENAI_API_KEY/);
+  assert.match(
+    credentialStep.env?.CLAUDE_CODE_OAUTH_TOKEN ?? "",
+    /secrets\.CLAUDE_CODE_OAUTH_TOKEN/,
+  );
+  assert.match(credentialStep.env?.ANTHROPIC_API_KEY ?? "", /secrets\.ANTHROPIC_API_KEY/);
+  assert.match(
+    credentialStep.run ?? "",
+    /CLAUDE_CODE_OAUTH_TOKEN=%s\\nANTHROPIC_API_KEY=%s\\nOPENAI_API_KEY=%s\\nGITHUB_TOKEN=%s/,
+  );
+});
+
+test("a Claude-only workflow does not require OpenAI credentials", () => {
+  const { workflow } = generate({ agents: { implement: "claude", review: "claude" } });
+
+  assert.doesNotMatch(
+    step(workflow, "Install Codex Cage and agent CLIs").run ?? "",
+    /@openai\/codex/,
+  );
+  assert.doesNotMatch(JSON.stringify(workflow), /OPENAI_API_KEY/);
 });

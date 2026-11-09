@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { agentShellCommand, type AgentAssignments } from "./agent/providers.js";
 import {
   createComposeProject,
   hasComposeServices,
@@ -32,7 +33,6 @@ import {
 import { RunJournal } from "./run/journal.js";
 import { buildImplementationPrompt } from "./run/prompts.js";
 import {
-  codexExecCommand,
   createDockerShellRunner,
   createHostShellRunner,
   createHostWorkspace,
@@ -40,12 +40,12 @@ import {
   formatCommandLog,
   readCurrentDiff,
   requiredShell,
-  shellQuote,
   type HostWorkspace,
   type ShellRunner,
   type ShellTimeouts,
   type StreamSink,
 } from "./sandbox-execution.js";
+import { shellQuote } from "./shell.js";
 import type { FailureCode, PhaseName, RunStore } from "./state.js";
 
 export type { ShellRunner } from "./sandbox-execution.js";
@@ -96,7 +96,7 @@ export type RuntimeContext = {
   repoResolution: RepoResolution;
   authenticatedRepo: AuthenticatedRepo;
   baseBranch: string;
-  model: string;
+  agents: AgentAssignments;
   draft: boolean;
   runId: string;
   branchName: string;
@@ -479,11 +479,10 @@ async function runImplementationLoop(input: {
 
       return await requiredShell(
         input.shell,
-        codexExecCommand({
-          model: input.context.model,
-          sandbox: "workspace-write",
+        agentShellCommand(input.context.agents.implement, {
+          access: "workspace-write",
           prompt,
-          bypassSandbox: input.context.executionMode === "direct",
+          executionMode: input.context.executionMode,
         }),
         input.redactor,
         runtimeCommandCredentials("implement", input.context),
