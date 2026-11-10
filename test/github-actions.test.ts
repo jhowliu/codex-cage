@@ -61,7 +61,7 @@ test("generates a parseable issue-label and dispatch workflow for the target che
   });
   assert.equal(
     step(workflow, "Install Codex Cage and agent CLIs").run,
-    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@openai/codex@0.125.0"',
+    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@openai/codex@0.167.0"',
   );
 });
 
@@ -167,7 +167,7 @@ test("installs and authenticates only the configured agent CLIs", () => {
 
   assert.equal(
     step(workflow, "Install Codex Cage and agent CLIs").run,
-    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@anthropic-ai/claude-code@2.1.319" "@openai/codex@0.125.0"',
+    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@anthropic-ai/claude-code@2.1.319" "@openai/codex@0.167.0"',
   );
   assert.match(validate.run ?? "", /CLAUDE_CODE_OAUTH_TOKEN.*ANTHROPIC_API_KEY/);
   assert.match(validate.run ?? "", /Missing OPENAI_API_KEY/);
