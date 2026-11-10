@@ -485,3 +485,116 @@ test("setup --yes keeps a pinned gh account that is no longer signed in", async 
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+async function goRepo(): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-setup-go-"));
+  await writeFile(join(cwd, "go.mod"), "module example.com/app\n", "utf8");
+  return cwd;
+}
+
+async function readConfig(cwd: string): Promise<Record<string, unknown>> {
+  const config: unknown = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8"));
+  assert.ok(config !== null && typeof config === "object");
+  return { ...config };
+}
+
+test("setup --yes detects a Go project and generates a runtime Dockerfile", async () => {
+  const cwd = await goRepo();
+  try {
+    const result = await setup(cwd, { yes: true, actions: false });
+    const config = await readConfig(cwd);
+    const dockerfile = await readFile(join(cwd, ".codex-cage", "Dockerfile"), "utf8");
+
+    assert.deepEqual(config.setup, ["go mod download"]);
+    assert.deepEqual(config.verify, ["go test ./..."]);
+    assert.deepEqual(config.runtime, {
+      image: "ghcr.io/jhowliu/codex-cage/base:0.1.2",
+      dockerfile: ".codex-cage/Dockerfile",
+    });
+    assert.match(dockerfile, /^FROM ghcr\.io\/jhowliu\/codex-cage\/base:0\.1\.2$/m);
+    assert.match(dockerfile, /COPY --from=golang:1-bookworm/);
+    assert.ok(result.created.includes(".codex-cage/Dockerfile"));
+    assert.ok(result.notices.some((notice) => notice.includes("pin its image tags")));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup references an existing runtime Dockerfile without overwriting it", async () => {
+  const cwd = await goRepo();
+  try {
+    await mkdir(join(cwd, ".codex-cage"), { recursive: true });
+    await writeFile(join(cwd, ".codex-cage", "Dockerfile"), "FROM custom\n", "utf8");
+    const result = await setup(cwd, { yes: true, actions: false });
+
+    assert.equal(
+      await readFile(join(cwd, ".codex-cage", "Dockerfile"), "utf8"),
+      "FROM custom\n",
+    );
+    assert.ok(!result.created.includes(".codex-cage/Dockerfile"));
+    assert.deepEqual((await readConfig(cwd)).runtime, {
+      image: "ghcr.io/jhowliu/codex-cage/base:0.1.2",
+      dockerfile: ".codex-cage/Dockerfile",
+    });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup skips the runtime Dockerfile when the user declines it", async () => {
+  const cwd = await goRepo();
+  const prompts: SetupPrompts = {
+    ...acceptingPrompts(),
+    async confirm(message, defaultValue) {
+      if (message.startsWith("Generate .codex-cage/Dockerfile")) return false;
+      if (message.startsWith("Enable GitHub Actions")) return false;
+      return defaultValue;
+    },
+  };
+  try {
+    const result = await setup(cwd, {}, prompts);
+
+    await assert.rejects(
+      readFile(join(cwd, ".codex-cage", "Dockerfile"), "utf8"),
+      /ENOENT/,
+    );
+    assert.equal((await readConfig(cwd)).runtime, undefined);
+    assert.ok(result.notices.some((notice) => notice.includes("has no go")));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup leaves a config that already sets runtime.dockerfile", async () => {
+  const cwd = await goRepo();
+  try {
+    await writeFile(
+      join(cwd, ".codex-cage.yml"),
+      "verify:\n  - go test ./...\nruntime:\n  dockerfile: docker/agent.Dockerfile\n",
+      "utf8",
+    );
+    const result = await setup(cwd, { yes: true, actions: false });
+
+    assert.deepEqual((await readConfig(cwd)).runtime, {
+      dockerfile: "docker/agent.Dockerfile",
+    });
+    assert.ok(!result.created.includes(".codex-cage/Dockerfile"));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup adds no runtime Dockerfile for an npm project", async () => {
+  const cwd = await tempRepo();
+  try {
+    await setup(cwd, { yes: true, actions: false });
+
+    assert.equal((await readConfig(cwd)).runtime, undefined);
+    await assert.rejects(
+      readFile(join(cwd, ".codex-cage", "Dockerfile"), "utf8"),
+      /ENOENT/,
+    );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
