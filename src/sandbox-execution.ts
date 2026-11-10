@@ -126,7 +126,10 @@ export function createDockerShellRunner(
           command,
         }),
         {
-          env: commandEnv,
+          // The docker CLI needs PATH, HOME (for its context), and DOCKER_* to
+          // reach the daemon. The container still gets only the command env,
+          // which dockerRunArgs forwards by name.
+          env: { ...pickProcessEnv(dockerClientEnvNames), ...commandEnv },
           onData: options.onData ?? sink?.onData,
           sink,
           ...resolveTimeouts(options, timeouts),
@@ -208,12 +211,21 @@ async function runProcess(
       ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
       ...outputTeeOptions(onData),
     });
+    const stopped = processResult.timedOut || processResult.isCanceled;
+    // A process that never started (ENOENT) or was killed by a signal has no
+    // exit code and usually no output; keep execa's reason for the log.
+    const failureReason =
+      processResult.exitCode === undefined &&
+      !stopped &&
+      typeof processResult.shortMessage === "string"
+        ? processResult.shortMessage
+        : "";
     return {
-      exitCode:
-        processResult.exitCode ??
-        (processResult.timedOut || processResult.isCanceled ? 124 : 1),
+      exitCode: processResult.exitCode ?? (stopped ? 124 : 1),
       stdout: processResult.stdout,
-      stderr: processResult.stderr,
+      stderr: [processResult.stderr, failureReason]
+        .filter((part) => part !== "")
+        .join("\n"),
     };
   } catch (error) {
     return processErrorResult(error);
@@ -253,23 +265,37 @@ function processErrorResult(error: unknown): CommandResult {
   return { exitCode: 1, stdout: "", stderr: String(error) };
 }
 
+const safeHostEnvNames = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "CI",
+  "TERM",
+  "SHELL",
+  "USER",
+  "LOGNAME",
+  "SYSTEMROOT",
+  "WINDIR",
+] as const;
+
+const dockerClientEnvNames = [
+  ...safeHostEnvNames,
+  "DOCKER_HOST",
+  "DOCKER_CONTEXT",
+  "DOCKER_CONFIG",
+  "DOCKER_CERT_PATH",
+  "DOCKER_TLS_VERIFY",
+] as const;
+
 function safeHostEnvironment(): Record<string, string> {
-  const allowed = [
-    "PATH",
-    "HOME",
-    "TMPDIR",
-    "LANG",
-    "LC_ALL",
-    "CI",
-    "TERM",
-    "SHELL",
-    "USER",
-    "LOGNAME",
-    "SYSTEMROOT",
-    "WINDIR",
-  ] as const;
+  return pickProcessEnv(safeHostEnvNames);
+}
+
+function pickProcessEnv(names: readonly string[]): Record<string, string> {
   return Object.fromEntries(
-    allowed.flatMap((name) => {
+    names.flatMap((name) => {
       const value = process.env[name];
       return value === undefined ? [] : [[name, value]];
     }),
