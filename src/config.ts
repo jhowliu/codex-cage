@@ -30,7 +30,7 @@ function resolveAgentAssignment(
 
 const actionsRuntimeSchema = z.object({
   image: z.string().min(1),
-  env: z.record(z.string()).optional(),
+  env: z.record(z.string(), z.string()).optional(),
   ports: z.array(z.string().min(1)).optional(),
   options: z.string().min(1).optional(),
 });
@@ -74,7 +74,9 @@ export const codexCageConfigSchema = z
         max_iterations: agent.max_iterations,
         max_review_cycles: agent.max_review_cycles,
       }))
-      .default({}),
+      // prefault parses {} through the schema, so a missing `agent` still gets
+      // the resolved per-role defaults (zod 4's default() would return {} as-is).
+      .prefault({}),
     timeouts: z
       .object({
         total_minutes: z.number().int().positive().default(90),
@@ -117,7 +119,7 @@ export const codexCageConfigSchema = z
         runner: z.string().min(1).default("ubuntu-latest"),
         timeout_minutes: z.number().int().positive().default(90),
         container: actionsRuntimeSchema.nullable().default(null),
-        services: z.record(actionsRuntimeSchema).default({}),
+        services: z.record(z.string(), actionsRuntimeSchema).default({}),
         labels: z
           .object({
             run: z.string().min(1).default(defaultActionsLabels.run),
