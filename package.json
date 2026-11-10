@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
     "qa": "npm run build && node --test \"dist/test/qa.test.js\"",
-    "qa:image": "docker build --build-arg CODEX_CLI_VERSION=0.125.0 --build-arg CLAUDE_CODE_VERSION=2.1.319 -t codex-cage/base:local docker/base && docker run --rm codex-cage/base:local sh -lc 'test \"$(id -un)\" = agent && node --version && npm --version && git --version && gh --version && codex --version && claude --version && curl --version >/dev/null && jq --version && ssh -V'",
+    "qa:image": "docker build --build-arg CODEX_CLI_VERSION=0.167.0 --build-arg CLAUDE_CODE_VERSION=2.1.319 -t codex-cage/base:local docker/base && docker run --rm codex-cage/base:local sh -lc 'test \"$(id -un)\" = agent && node --version && npm --version && git --version && gh --version && codex --version && claude --version && curl --version >/dev/null && jq --version && ssh -V'",
     "lint": "npm run typecheck",
     "format": "prettier --check ."
   },
@@ -32,7 +32,7 @@
     "react-dom": "^19.1.0",
     "sql.js": "^1.12.0",
     "yaml": "^2.7.0",
-    "zod": "^3.24.2"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -197,7 +197,24 @@ actions:
     blocked: codex-cage:blocked
 ```
 
-`verify` must contain at least one command. Setup detects common package scripts and refuses to write a new configuration when no verification command can be selected.
+`verify` must contain at least one command. Setup refuses to write a new configuration when no verification command can be selected. It detects commands from files at the repository root:
+
+| Detected from                                                      | `setup`                                          | `verify`                                           | Toolchain added to the runtime Dockerfile |
+| ------------------------------------------------------------------ | ------------------------------------------------ | -------------------------------------------------- | ----------------------------------------- |
+| `package.json` + `package-lock.json`                               | `npm ci`                                         | `npm test` (else `typecheck`, else `build` script) | none                                      |
+| `package.json` without a lockfile                                  | `npm install --no-package-lock`                  | same                                               | none                                      |
+| `pnpm-lock.yaml`                                                   | `pnpm install --frozen-lockfile`                 | `pnpm test`                                        | corepack                                  |
+| `yarn.lock` (Yarn 1 / Yarn 2+)                                     | `yarn install --frozen-lockfile` / `--immutable` | `yarn test`                                        | none / corepack                           |
+| `uv.lock`                                                          | `uv sync --frozen`                               | `uv run pytest`                                    | uv                                        |
+| `poetry.lock`                                                      | `poetry install`                                 | `poetry run pytest`                                | uv, poetry                                |
+| `requirements.txt`                                                 | venv in `$HOME/.venv` + `pip install -r`         | `"$HOME/.venv/bin/python" -m pytest`               | python                                    |
+| `go.mod`                                                           | `go mod download`                                | `go test ./...`                                    | go                                        |
+| `Cargo.toml`                                                       | `cargo fetch`                                    | `cargo test`                                       | rust                                      |
+| `pom.xml` (with or without `mvnw`)                                 | none                                             | `./mvnw -B test` / `mvn -B test`                   | jdk (+ maven)                             |
+| `build.gradle(.kts)` + `gradlew`                                   | none                                             | `./gradlew test`                                   | jdk                                       |
+| `Makefile` with a `test:` target (only when nothing else verifies) | none                                             | `make test`                                        | none                                      |
+
+Every matching ecosystem contributes, so a Node + Go repository gets both setup commands. Interactive setup shows the detected commands for confirmation. When a toolchain is missing from the base image and `runtime.dockerfile` is not set, setup offers to write `.codex-cage/Dockerfile` (`FROM` the configured `runtime.image`, with toolchains copied from official images such as `golang:1-bookworm`) and points `runtime.dockerfile` at it; an existing file at that path is kept. Pin the image tags in that file for reproducible runs. Virtualenvs and Cargo build output live under `$HOME` in the container so they never land in the pull request.
 
 `agent.implement` and `agent.review` each pick a `provider` (`claude` or `codex`) and an optional `model` (default `claude-opus-5-5` for Claude, `gpt-5.4-mini` for Codex). A new config from `codex-cage setup` implements with Claude and reviews with Codex; non-interactive setup falls back to Codex for implementation when no Claude credential is found. A Codex login with a ChatGPT account cannot use `gpt-5.4-mini`, so when there is no `OPENAI_API_KEY`, setup takes the Codex model from the top-level `model` in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). A config without these keys keeps the original behavior: Codex for both roles, with the legacy `agent.model` as the Codex model. `codex-cage run --model` overrides only the implementation model.
 

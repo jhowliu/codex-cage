@@ -38,7 +38,7 @@ const defaultLabels = {
   blocked: "codex-cage:blocked",
 } satisfies GitHubActionsLabels;
 
-const codexCliVersion = "0.125.0";
+const codexCliVersion = "0.167.0";
 const claudeCodeVersion = "2.1.319";
 const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const labelPattern = /^[0-9A-Za-z][0-9A-Za-z .:/_-]*$/;
