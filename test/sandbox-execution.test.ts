@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { codexExecCommand } from "../src/agent/codex.js";
-import { createDockerSandbox } from "../src/docker.js";
+import { createDockerSandbox, execaDockerRunner } from "../src/docker.js";
+import type { CommandResult } from "../src/publish.js";
+import { RunFailureError } from "../src/run/errors.js";
 import {
+  agentCommandFailure,
   createDockerShellRunner,
   createHostShellRunner,
   createHostWorkspace,
@@ -80,17 +83,121 @@ test("docker shell runner finds the docker CLI and daemon from the host environm
   });
 });
 
-test("docker shell runner reports why the docker CLI could not start", async () => {
+async function fakeDocker(dir: string, script: string): Promise<void> {
+  await writeFile(join(dir, "docker"), `#!/bin/sh\n${script}\n`);
+  await chmod(join(dir, "docker"), 0o755);
+}
+
+async function rejectsWithFailureCode(
+  promise: Promise<unknown>,
+  failureCode: string,
+  message: RegExp,
+): Promise<void> {
+  await assert.rejects(promise, (error: unknown) => {
+    assert.ok(error instanceof RunFailureError);
+    assert.equal(error.failureCode, failureCode);
+    assert.match(error.message, message);
+    return true;
+  });
+}
+
+test("docker shell runner reports a missing docker CLI as docker_unavailable", async () => {
   await withWorkspace(async (emptyDir) => {
     await withProcessEnv({ PATH: emptyDir }, async () => {
       const runner = createDockerShellRunner(testSandbox(), {});
 
-      const result = await runner.run("true");
-
-      assert.equal(result.exitCode, 1);
-      assert.match(result.stderr, /ENOENT/);
+      await rejectsWithFailureCode(runner.run("true"), "docker_unavailable", /ENOENT/);
     });
   });
+});
+
+test("docker shell runner reports an unreachable daemon as docker_unavailable", async () => {
+  await withWorkspace(async (binDir) => {
+    await fakeDocker(
+      binDir,
+      'echo "docker: Cannot connect to the Docker daemon at unix:///var/run/docker.sock." >&2; exit 125',
+    );
+    await withProcessEnv({ PATH: `${binDir}:/usr/bin:/bin` }, async () => {
+      const runner = createDockerShellRunner(testSandbox(), {});
+
+      await rejectsWithFailureCode(
+        runner.run("true"),
+        "docker_unavailable",
+        /Cannot connect to the Docker daemon/,
+      );
+    });
+  });
+});
+
+test("docker shell runner returns failures of the sandbox command itself", async () => {
+  await withWorkspace(async (binDir) => {
+    await fakeDocker(binDir, 'echo "npm: not found" >&2; exit 127');
+    await withProcessEnv({ PATH: `${binDir}:/usr/bin:/bin` }, async () => {
+      const runner = createDockerShellRunner(testSandbox(), {});
+
+      const result = await runner.run("npm ci");
+
+      assert.equal(result.exitCode, 127);
+      assert.match(result.stderr, /npm: not found/);
+    });
+  });
+});
+
+test("docker runner reports a missing CLI or daemon as docker_unavailable", async () => {
+  await withWorkspace(async (dir) => {
+    await withProcessEnv({ PATH: dir }, async () => {
+      await rejectsWithFailureCode(
+        execaDockerRunner.run(["volume", "create", "x"]),
+        "docker_unavailable",
+        /not found on PATH/,
+      );
+    });
+
+    await fakeDocker(dir, 'echo "Cannot connect to the Docker daemon" >&2; exit 1');
+    await withProcessEnv({ PATH: `${dir}:/usr/bin:/bin` }, async () => {
+      await rejectsWithFailureCode(
+        execaDockerRunner.run(["volume", "create", "x"]),
+        "docker_unavailable",
+        /Cannot connect to the Docker daemon/,
+      );
+    });
+  });
+});
+
+test("docker runner keeps the command's own error when Docker is available", async () => {
+  await withWorkspace(async (binDir) => {
+    await fakeDocker(binDir, 'if [ "$1" = info ]; then echo 27.0.0; exit 0; fi; exit 3');
+    await withProcessEnv({ PATH: `${binDir}:/usr/bin:/bin` }, async () => {
+      await assert.rejects(execaDockerRunner.run(["volume", "create", "x"]), (error) => {
+        assert.ok(!(error instanceof RunFailureError));
+        return true;
+      });
+    });
+  });
+});
+
+test("agentCommandFailure maps timeouts, provider errors, and other failures", () => {
+  const failure = (provider: "claude" | "codex", result: CommandResult) =>
+    agentCommandFailure("implement", provider, "log", result).failureCode;
+
+  assert.equal(failure("codex", { exitCode: 124, stdout: "", stderr: "" }), "timeout");
+  assert.equal(
+    failure("claude", {
+      exitCode: 1,
+      stdout: '{"type":"result","is_error":true,"api_error_status":401}',
+      stderr: "",
+    }),
+    "agent_auth_failed",
+  );
+  assert.equal(
+    failure("codex", { exitCode: 1, stdout: "", stderr: "ERROR: boom" }),
+    "implement_failed",
+  );
+  assert.equal(
+    agentCommandFailure("review", "codex", "log", { exitCode: 1, stdout: "", stderr: "" })
+      .failureCode,
+    "review_failed",
+  );
 });
 
 test("host shell runner runs commands in the workspace directory", async () => {

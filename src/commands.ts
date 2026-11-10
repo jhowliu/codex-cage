@@ -7,7 +7,7 @@ import { doctorProject, type DoctorResult } from "./doctor.js";
 import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
 import { setupProject, type SetupResult } from "./setup.js";
-import { openRunStore } from "./state.js";
+import { failureCodes, openRunStore } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
 export const RESULT_FILE_ENV = "CODEX_CAGE_RESULT_FILE";
@@ -482,9 +482,7 @@ function createColorizer(stream: NodeJS.WriteStream): Colorizer {
       if (
         value === "failed" ||
         value === "guard_failed" ||
-        value === "verify_failed" ||
-        value === "review_blocking" ||
-        value === "internal_error"
+        failureCodes.some((code) => code === value)
       ) {
         return style("31", value);
       }

@@ -1,7 +1,8 @@
 import type { ExecutionMode } from "../config.js";
 import { shellQuote } from "../shell.js";
-import { claudeExecCommand, extractClaudeResult } from "./claude.js";
-import { codexExecCommand } from "./codex.js";
+import type { FailureCode } from "../state.js";
+import { claudeExecCommand, claudeFailureCode, extractClaudeResult } from "./claude.js";
+import { codexExecCommand, codexFailureCode } from "./codex.js";
 
 export const agentProviders = ["codex", "claude"] as const;
 export type AgentProvider = (typeof agentProviders)[number];
@@ -15,6 +16,12 @@ export type AgentAssignment = {
 };
 
 export type AgentAssignments = Record<AgentRole, AgentAssignment>;
+
+/** Agent failures that a rerun cannot fix without changing credentials or config. */
+export type AgentFailureCode = Extract<
+  FailureCode,
+  "agent_auth_failed" | "agent_model_unavailable"
+>;
 
 export const defaultAgentModels = {
   codex: "gpt-5.4-mini",
@@ -74,6 +81,26 @@ export function extractAgentResult(provider: AgentProvider, stdout: string): str
       return stdout;
     case "claude":
       return extractClaudeResult(stdout);
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
+/**
+ * Recognizes credential and model errors in an agent's output. Returns null
+ * for every other failure, which callers report as a generic role failure.
+ */
+export function agentFailureCode(
+  provider: AgentProvider,
+  output: { stdout: string; stderr: string },
+): AgentFailureCode | null {
+  switch (provider) {
+    case "codex":
+      return codexFailureCode(`${output.stdout}\n${output.stderr}`);
+    case "claude":
+      return claudeFailureCode(output.stdout);
     default: {
       const exhaustiveProvider: never = provider;
       return exhaustiveProvider;

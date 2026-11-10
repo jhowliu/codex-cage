@@ -11,8 +11,16 @@ import {
 } from "./docker.js";
 import type { CommandResult, CommandRunOptions, CommandRunner } from "./publish.js";
 import type { ReviewAgentRunner } from "./review.js";
-import { agentShellCommand, extractAgentResult } from "./agent/providers.js";
+import {
+  agentFailureCode,
+  agentShellCommand,
+  extractAgentResult,
+  type AgentAssignment,
+  type AgentProvider,
+  type AgentRole,
+} from "./agent/providers.js";
 import type { ExecutionMode } from "./config.js";
+import type { FailureCode } from "./state.js";
 import { shellQuote } from "./shell.js";
 import { RunFailureError } from "./run/errors.js";
 
@@ -113,7 +121,7 @@ export function createDockerShellRunner(
       options: DockerCommandOptions = {},
     ): Promise<CommandResult> {
       const commandEnv = options.env ?? {};
-      return await runProcess(
+      const { started, ...result } = await runProcess(
         "docker",
         dockerRunArgs({
           image: sandbox.image,
@@ -135,8 +143,23 @@ export function createDockerShellRunner(
           ...resolveTimeouts(options, timeouts),
         },
       );
+      if (!started || dockerDaemonUnreachable(result)) {
+        throw new RunFailureError(
+          "docker_unavailable",
+          `Docker could not run the sandbox command: ${result.stderr.trim()}`,
+        );
+      }
+      return result;
     },
   };
+}
+
+// `docker run` exits 125 for its own errors, including an unreachable daemon.
+function dockerDaemonUnreachable(result: CommandResult): boolean {
+  return (
+    result.exitCode === 125 &&
+    /Cannot connect to the Docker daemon|error during connect/.test(result.stderr)
+  );
 }
 
 export function createHostShellRunner(
@@ -151,7 +174,7 @@ export function createHostShellRunner(
       options: DockerCommandOptions = {},
     ): Promise<CommandResult> {
       const commandEnv = { ...safeHostEnvironment(), ...env, ...(options.env ?? {}) };
-      return await runProcess(
+      const { started: _started, ...result } = await runProcess(
         commandWithGitHubAuth(
           hostCommandWithCodexAuth(command, options.codexAuthFilePath, commandEnv),
           commandEnv,
@@ -166,6 +189,7 @@ export function createHostShellRunner(
           ...resolveTimeouts(options, timeouts),
         },
       );
+      return result;
     },
   };
 }
@@ -180,11 +204,14 @@ type ProcessOptions = {
   idleTimeoutMs: number | undefined;
 };
 
+/** `started` is false when the executable could not be spawned (e.g. ENOENT). */
+type ProcessResult = CommandResult & { started: boolean };
+
 async function runProcess(
   command: string,
   args: readonly string[],
   options: ProcessOptions,
-): Promise<CommandResult> {
+): Promise<ProcessResult> {
   const controller = new AbortController();
   let idleTimer: NodeJS.Timeout | undefined;
   const resetIdleTimer = (): void => {
@@ -221,6 +248,11 @@ async function runProcess(
         ? processResult.shortMessage
         : "";
     return {
+      started: !(
+        processResult.exitCode === undefined &&
+        processResult.signal === undefined &&
+        !stopped
+      ),
       exitCode: processResult.exitCode ?? (stopped ? 124 : 1),
       stdout: processResult.stdout,
       stderr: [processResult.stderr, failureReason]
@@ -228,7 +260,7 @@ async function runProcess(
         .join("\n"),
     };
   } catch (error) {
-    return processErrorResult(error);
+    return { started: true, ...processErrorResult(error) };
   } finally {
     if (idleTimer !== undefined) clearTimeout(idleTimer);
     options.sink?.flush();
@@ -361,15 +393,63 @@ export function createReviewAgentRunner(
       const result = await shell.run(command, options);
 
       if (result.exitCode !== 0) {
-        if (result.exitCode === 124) {
-          throw new RunFailureError("timeout", formatCommandLog(command, result));
-        }
-        throw new Error(formatCommandLog(command, result));
+        throw agentCommandFailure(
+          "review",
+          input.agent.provider,
+          formatCommandLog(command, result),
+          result,
+        );
       }
 
-      return extractAgentResult(input.agent.provider, result.stdout);
+      try {
+        return extractAgentResult(input.agent.provider, result.stdout);
+      } catch (error) {
+        throw new RunFailureError(
+          agentFailureCode(input.agent.provider, result) ?? "review_failed",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     },
   };
+}
+
+const roleFailureCodes = {
+  implement: "implement_failed",
+  review: "review_failed",
+} as const satisfies Record<AgentRole, FailureCode>;
+
+/**
+ * Maps a failed agent command to a failure code: timeouts, then credential
+ * and model errors the provider reported, then a generic role failure.
+ */
+export function agentCommandFailure(
+  role: AgentRole,
+  provider: AgentProvider,
+  log: string,
+  result: CommandResult,
+): RunFailureError {
+  if (result.exitCode === 124) return new RunFailureError("timeout", log);
+  return new RunFailureError(
+    agentFailureCode(provider, result) ?? roleFailureCodes[role],
+    log,
+  );
+}
+
+/** Like requiredShell, for agent commands: failures carry an agent failure code. */
+export async function requiredAgentShell(
+  shell: ShellRunner,
+  input: { role: AgentRole; agent: AgentAssignment; command: string },
+  redactor: (input: string) => string,
+  options?: DockerCommandOptions,
+): Promise<string> {
+  const result = await shell.run(input.command, options);
+  const log = redactor(formatCommandLog(input.command, result));
+
+  if (result.exitCode !== 0) {
+    throw agentCommandFailure(input.role, input.agent.provider, log, result);
+  }
+
+  return log;
 }
 
 export function formatCommandLog(command: string, result: CommandResult): string {
