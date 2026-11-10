@@ -5,6 +5,7 @@ import { execa } from "execa";
 import { z } from "zod";
 import { claudeOptionArgs, extractClaudeResult } from "./agent/claude.js";
 import type { AgentAssignment } from "./agent/providers.js";
+import { RunFailureError } from "./run/errors.js";
 
 export type ReviewFindingSeverity = "blocking" | "non_blocking";
 
@@ -245,7 +246,15 @@ export async function runIndependentReview(
     throw new ReviewModifiedDiffError();
   }
 
-  const report = parseReviewReport(output);
+  let report: ReviewReport;
+  try {
+    report = parseReviewReport(output);
+  } catch (error) {
+    throw new RunFailureError(
+      "review_failed",
+      `Review output was not a valid report: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   return {
     report,

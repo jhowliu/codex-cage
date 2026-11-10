@@ -39,6 +39,7 @@ import {
   createLineStreamSink,
   formatCommandLog,
   readCurrentDiff,
+  requiredAgentShell,
   requiredShell,
   type HostWorkspace,
   type ShellRunner,
@@ -371,15 +372,17 @@ async function provisionDockerSandbox(input: {
   await journal.setRunStatus("cloning");
   await journal.runPhase("cloning", async () => {
     await sandbox.create();
-    await sandbox.cloneRepository();
-    return await requiredShell(
-      shell,
-      `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
-        context.baseBranch,
-      )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
-      redactor,
-      cloneCredentials,
-    );
+    return await asCloneFailure(async () => {
+      await sandbox.cloneRepository();
+      return await requiredShell(
+        shell,
+        `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
+          context.baseBranch,
+        )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+        redactor,
+        cloneCredentials,
+      );
+    });
   });
 
   return shell;
@@ -412,27 +415,43 @@ async function provisionDirectWorkspace(input: {
   );
 
   await journal.setRunStatus("cloning");
-  await journal.runPhase("cloning", async () => {
-    const remoteUrl = unauthenticatedRemoteUrl(context.authenticatedRepo.cloneUrl);
-    await requiredShell(
-      shell,
-      `git clone ${shellQuote(remoteUrl)} . && git remote set-url origin ${shellQuote(
-        remoteUrl,
-      )}`,
-      redactor,
-      cloneCredentials,
-    );
-    return await requiredShell(
-      shell,
-      `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
-        context.baseBranch,
-      )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
-      redactor,
-      cloneCredentials,
-    );
-  });
+  await journal.runPhase("cloning", async () =>
+    asCloneFailure(async () => {
+      const remoteUrl = unauthenticatedRemoteUrl(context.authenticatedRepo.cloneUrl);
+      await requiredShell(
+        shell,
+        `git clone ${shellQuote(remoteUrl)} . && git remote set-url origin ${shellQuote(
+          remoteUrl,
+        )}`,
+        redactor,
+        cloneCredentials,
+      );
+      return await requiredShell(
+        shell,
+        `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
+          context.baseBranch,
+        )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+        redactor,
+        cloneCredentials,
+      );
+    }),
+  );
 
   return shell;
+}
+
+/**
+ * Reports clone and base-branch checkout failures (missing repo access, an
+ * empty repository, an unknown base branch) as clone_failed. Failures that
+ * already carry a code, such as docker_unavailable or timeout, pass through.
+ */
+async function asCloneFailure<T>(clone: () => Promise<T>): Promise<T> {
+  try {
+    return await clone();
+  } catch (error) {
+    if (error instanceof RunFailureError) throw error;
+    throw new RunFailureError("clone_failed", formatError(error));
+  }
 }
 
 function runtimeCommandCredentials(
@@ -477,13 +496,17 @@ async function runImplementationLoop(input: {
         input.redactor(prompt),
       );
 
-      return await requiredShell(
+      return await requiredAgentShell(
         input.shell,
-        agentShellCommand(input.context.agents.implement, {
-          access: "workspace-write",
-          prompt,
-          executionMode: input.context.executionMode,
-        }),
+        {
+          role: "implement",
+          agent: input.context.agents.implement,
+          command: agentShellCommand(input.context.agents.implement, {
+            access: "workspace-write",
+            prompt,
+            executionMode: input.context.executionMode,
+          }),
+        },
         input.redactor,
         runtimeCommandCredentials("implement", input.context),
       );

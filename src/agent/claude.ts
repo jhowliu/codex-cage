@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { shellQuote } from "../shell.js";
+import type { AgentFailureCode } from "./providers.js";
 
 // Tools the read-only reviewer may use. In print mode Claude Code denies any
 // tool outside this list instead of prompting.
@@ -105,6 +106,30 @@ export function extractClaudeResult(stdout: string): string {
   }
 
   return resultEvent.result ?? "";
+}
+
+// Claude Code tags API failures on stream-json events: `error` on the
+// assistant/retry events, `api_error_status` on the final result event.
+const claudeErrorEventSchema = z
+  .object({
+    error: z.string().nullable().optional(),
+    api_error_status: z.number().nullable().optional(),
+  })
+  .passthrough();
+
+export function claudeFailureCode(stdout: string): AgentFailureCode | null {
+  for (const line of stdout.split(/\r?\n/)) {
+    const event = claudeErrorEventSchema.safeParse(parseJsonLine(line));
+    if (!event.success) continue;
+    const { error, api_error_status: status } = event.data;
+    if (error === "authentication_failed" || status === 401 || status === 403) {
+      return "agent_auth_failed";
+    }
+    if (error === "model_not_found" || status === 404) {
+      return "agent_model_unavailable";
+    }
+  }
+  return null;
 }
 
 function parseJsonLine(line: string): unknown {

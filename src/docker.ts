@@ -1,4 +1,5 @@
-import { execa } from "execa";
+import { ExecaError, execa } from "execa";
+import { RunFailureError } from "./run/errors.js";
 
 export type DockerRunner = {
   run: (args: string[], options?: DockerRunOptions) => Promise<void>;
@@ -92,14 +93,38 @@ const managedLabel = `${managedLabelName}=true`;
 
 export const execaDockerRunner: DockerRunner = {
   async run(args: string[], options: DockerRunOptions = {}): Promise<void> {
-    if (options.env === undefined) {
-      await execa("docker", args, { stdio: "inherit" });
-      return;
-    }
+    try {
+      if (options.env === undefined) {
+        await execa("docker", args, { stdio: "inherit" });
+        return;
+      }
 
-    await execa("docker", args, { env: options.env, stdio: "inherit" });
+      await execa("docker", args, { env: options.env, stdio: "inherit" });
+    } catch (error) {
+      const reason = await dockerUnavailableReason(error);
+      if (reason !== null) throw new RunFailureError("docker_unavailable", reason);
+      throw error;
+    }
   },
 };
+
+/**
+ * Explains a failed docker command when Docker itself is unavailable: the CLI
+ * is missing, or the daemon does not answer. Returns null when Docker works,
+ * so the command's own failure is reported instead.
+ */
+async function dockerUnavailableReason(error: unknown): Promise<string | null> {
+  if (error instanceof ExecaError && error.code === "ENOENT") {
+    return "The docker CLI was not found on PATH.";
+  }
+
+  const version = await execa("docker", ["version", "--format", "{{.Server.Version}}"], {
+    reject: false,
+  });
+  if (version.exitCode === 0) return null;
+  const detail = version.stderr.trim();
+  return detail === "" ? "The Docker daemon is not reachable." : detail;
+}
 
 export const execaDockerCommandRunner: DockerCommandRunner = {
   async run(args: string[]): Promise<DockerCommandResult> {

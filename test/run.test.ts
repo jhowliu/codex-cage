@@ -1531,3 +1531,122 @@ agent:
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+const claudeAuthFailureStdout = [
+  '{"type":"assistant","error":"authentication_failed","message":{"content":[]}}',
+  '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}',
+].join("\n");
+
+async function runFailingCase(input: {
+  config: string;
+  runId: string;
+  results: [string, CommandResult][];
+}): Promise<{ failureCode: FailureCode | null; lastPhase: string | undefined }> {
+  const cwd = await createProject(input.config);
+  const events: string[] = [];
+  const shell = shellRunner(new Map(input.results));
+
+  try {
+    const result = await runCodexCage(
+      { cwd, issueUrl: issue.url },
+      {
+        executionMode: "docker",
+        generateRunId: () => input.runId,
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => issue,
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shell,
+      },
+    );
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails(input.runId);
+    store.close();
+    assert.equal(details.run.failureCode, result.failureCode);
+    return { failureCode: result.failureCode, lastPhase: details.phases.at(-1)?.name };
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+}
+
+const passingDiff: [string, CommandResult] = [
+  "git add --intent-to-add",
+  commandResult(`diff --git a/src/app.ts b/src/app.ts
+@@ -1 +1,2 @@
+ export const ok = true;
++export const changed = true;
+`),
+];
+
+test("runCodexCage reports a missing base branch as clone_failed", async () => {
+  const outcome = await runFailingCase({
+    config: "verify:\n  - npm test\n",
+    runId: "run-test-clone",
+    results: [
+      [
+        "git fetch origin",
+        commandResult("", 128, "fatal: couldn't find remote ref main"),
+      ],
+    ],
+  });
+
+  assert.deepEqual(outcome, { failureCode: "clone_failed", lastPhase: "cloning" });
+});
+
+test("runCodexCage reports a rejected Claude token as agent_auth_failed", async () => {
+  const outcome = await runFailingCase({
+    config: "verify:\n  - npm test\nagent:\n  implement:\n    provider: claude\n",
+    runId: "run-test-claude-auth",
+    results: [
+      ["git fetch origin", commandResult()],
+      ["claude -p", commandResult(claudeAuthFailureStdout, 1)],
+    ],
+  });
+
+  assert.deepEqual(outcome, { failureCode: "agent_auth_failed", lastPhase: "implement" });
+});
+
+test("runCodexCage reports other implementation errors as implement_failed", async () => {
+  const outcome = await runFailingCase({
+    config: "verify:\n  - npm test\n",
+    runId: "run-test-implement",
+    results: [
+      ["git fetch origin", commandResult()],
+      ["codex exec", commandResult("", 1, "ERROR: stream disconnected")],
+    ],
+  });
+
+  assert.deepEqual(outcome, { failureCode: "implement_failed", lastPhase: "implement" });
+});
+
+test("runCodexCage reports an unsupported review model as agent_model_unavailable", async () => {
+  const outcome = await runFailingCase({
+    config: "verify:\n  - npm test\n",
+    runId: "run-test-review-model",
+    results: [
+      ["git fetch origin", commandResult()],
+      [
+        "--output-schema",
+        commandResult(
+          "",
+          1,
+          `ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The 'gpt-5.4-mini' model is not supported when using Codex with a ChatGPT account.","code":"model_not_found"}}`,
+        ),
+      ],
+      ["codex exec", commandResult("implemented")],
+      ["npm test", commandResult("tests passed")],
+      passingDiff,
+    ],
+  });
+
+  assert.deepEqual(outcome, {
+    failureCode: "agent_model_unavailable",
+    lastPhase: "review",
+  });
+});
