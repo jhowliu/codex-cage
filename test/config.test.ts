@@ -26,12 +26,13 @@ test("config schema accepts a minimal valid config", () => {
 });
 
 test("config schema rejects empty verify commands", () => {
-  assert.throws(
-    () =>
-      codexCageConfigSchema.parse({
-        verify: [],
-      }),
-    /Array must contain at least 1 element/,
+  const result = codexCageConfigSchema.safeParse({ verify: [] });
+
+  assert.equal(result.success, false);
+  assert.ok(
+    result.error?.issues.some(
+      (issue) => issue.code === "too_small" && issue.path.join(".") === "verify",
+    ),
   );
 });
 
