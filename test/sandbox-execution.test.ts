@@ -166,7 +166,10 @@ test("docker runner reports a missing CLI or daemon as docker_unavailable", asyn
 
 test("docker runner keeps the command's own error when Docker is available", async () => {
   await withWorkspace(async (binDir) => {
-    await fakeDocker(binDir, 'if [ "$1" = info ]; then echo 27.0.0; exit 0; fi; exit 3');
+    await fakeDocker(
+      binDir,
+      'if [ "$1" = version ]; then echo 27.0.0; exit 0; fi; exit 3',
+    );
     await withProcessEnv({ PATH: `${binDir}:/usr/bin:/bin` }, async () => {
       await assert.rejects(execaDockerRunner.run(["volume", "create", "x"]), (error) => {
         assert.ok(!(error instanceof RunFailureError));

@@ -118,11 +118,11 @@ async function dockerUnavailableReason(error: unknown): Promise<string | null> {
     return "The docker CLI was not found on PATH.";
   }
 
-  const info = await execa("docker", ["info", "--format", "{{.ServerVersion}}"], {
+  const version = await execa("docker", ["version", "--format", "{{.Server.Version}}"], {
     reject: false,
   });
-  if (info.exitCode === 0) return null;
-  const detail = info.stderr.trim();
+  if (version.exitCode === 0) return null;
+  const detail = version.stderr.trim();
   return detail === "" ? "The Docker daemon is not reachable." : detail;
 }
 
