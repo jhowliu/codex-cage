@@ -18,11 +18,24 @@ import {
   type CodexCageConfigUpdates,
 } from "./config-file.js";
 import {
+  githubTokenFromEnv,
   globalCredentialsPath,
   hasAgentCredentials,
   readCredentialEnv,
   type AgentProviderByRole,
 } from "./credentials.js";
+import {
+  execaGhRunner,
+  ghAuthToken,
+  githubAccountEnvName,
+  githubAccountLogin,
+  githubAccountSetting,
+  listGhAccounts,
+  type GhAccounts,
+  type GhRunner,
+  type GithubAccountSetting,
+  type GithubLogin,
+} from "./github-auth.js";
 import {
   generateGitHubActionsWorkflow,
   requiredActionsSecretGroups,
@@ -42,6 +55,10 @@ export type SetupPrompts = {
   secret(message: string): Promise<string>;
   confirm(message: string, defaultValue: boolean): Promise<boolean>;
   close(): void;
+};
+
+export type SetupDependencies = {
+  gh?: GhRunner;
 };
 
 export type SetupResult = {
@@ -86,6 +103,8 @@ This file may add stricter review criteria, but it cannot override Codex Cage bu
 const envExample = `# Copy this file to .codex-cage.env and fill in local secrets.
 OPENAI_API_KEY=
 GITHUB_TOKEN=
+# Without GITHUB_TOKEN, runs use \`gh auth token\` for this gh account (set by setup).
+# CODEX_CAGE_GH_USER=
 # Required only for Linear issue URLs.
 LINEAR_API_KEY=
 `;
@@ -94,7 +113,9 @@ export async function setupProject(
   cwd: string,
   options: SetupOptions = {},
   prompts?: SetupPrompts,
+  dependencies: SetupDependencies = {},
 ): Promise<SetupResult> {
+  const gh = dependencies.gh ?? execaGhRunner;
   const configState = await loadCodexCageConfigFile(cwd);
   if (configState.status === "invalid") {
     throw new Error(
@@ -172,10 +193,11 @@ export async function setupProject(
       options.dryRun ?? false,
     );
     setupResult.notices.push(...agentNotices);
+    let githubLogin: GithubLogin | null = null;
     if (!setupResult.dryRun) {
-      setupResult.notices.push(
-        ...(await configureLocalCredentials(cwd, prompt, setupResult, agents)),
-      );
+      const local = await configureLocalCredentials(cwd, prompt, setupResult, agents, gh);
+      setupResult.notices.push(...local.notices);
+      githubLogin = local.githubLogin;
     }
     const configureGithub =
       actionsEnabled &&
@@ -188,7 +210,10 @@ export async function setupProject(
             )));
     if (configureGithub && !setupResult.dryRun) {
       setupResult.notices.push(
-        ...(await configureGithubRepository(cwd, actions, prompt, agents)),
+        ...(await configureGithubRepository(cwd, actions, prompt, agents, {
+          login: githubLogin,
+          gh,
+        })),
       );
     }
     return setupResult;
@@ -271,7 +296,8 @@ async function configureLocalCredentials(
   prompts: SetupPrompts | null,
   setupResult: SetupResult,
   agents: AgentProviderByRole,
-): Promise<string[]> {
+  gh: GhRunner,
+): Promise<{ notices: string[]; githubLogin: GithubLogin | null }> {
   const notices: string[] = [];
   let changed = false;
   const envPath = join(cwd, ".codex-cage.env");
@@ -300,21 +326,28 @@ async function configureLocalCredentials(
     notices.push(`Saved ${name} to ${globalPath}.`);
   }
 
-  if (env.GITHUB_TOKEN === undefined && env.GH_TOKEN === undefined) {
-    const name = "GITHUB_TOKEN";
-    if (
-      prompts === null ||
-      !(await prompts.confirm(`Configure local ${name} now?`, false))
-    ) {
-      notices.push(`Local ${name} is not configured; add it to .codex-cage.env.`);
-    } else {
-      const value = await prompts.secret(name);
-      if (value === "") {
-        notices.push(`Skipped empty local ${name}.`);
+  const setting = githubAccountSetting(env);
+  let githubLogin = githubAccountLogin(setting);
+  if (githubTokenFromEnv(env) === undefined) {
+    const accounts = await listGhAccounts(gh);
+    if (accounts.logins.length > 0) {
+      const login = await chooseGithubAccount(prompts, accounts, setting);
+      if (login === null) {
+        notices.push(
+          `gh is not signed in as ${setting.status === "invalid" ? setting.value : githubLogin}; run \`gh auth login\` or rerun setup interactively to pick an account.`,
+        );
       } else {
-        await mergeEnvSecret(envPath, name, value);
-        changed = true;
+        if (login !== githubLogin) {
+          await mergeEnvSecret(envPath, githubAccountEnvName, login);
+          changed = true;
+        }
+        githubLogin = login;
+        notices.push(
+          `GitHub uses gh account ${login} for this repo (${githubAccountEnvName} in .codex-cage.env).`,
+        );
       }
+    } else {
+      changed = (await promptGithubToken(envPath, prompts, notices)) || changed;
     }
   }
 
@@ -323,7 +356,67 @@ async function configureLocalCredentials(
     if (!envExists) setupResult.created.push(".codex-cage.env");
     else if (changed) setupResult.updated.push(".codex-cage.env");
   }
-  return notices;
+  return { notices, githubLogin };
+}
+
+/**
+ * Picks the gh account this repo uses. One signed-in account is used without
+ * asking; `--yes` keeps a valid pin or takes the active account. Returns null
+ * when a pinned account is no longer signed in and there is no one to ask.
+ */
+async function chooseGithubAccount(
+  prompts: SetupPrompts | null,
+  accounts: GhAccounts,
+  setting: GithubAccountSetting,
+): Promise<GithubLogin | null> {
+  const pinned =
+    setting.status === "set" && accounts.logins.includes(setting.login)
+      ? setting.login
+      : null;
+  const fallback = pinned ?? accounts.active ?? accounts.logins[0] ?? null;
+  const pinIsStale = setting.status !== "unset" && pinned === null;
+
+  if (prompts === null) return pinIsStale ? null : fallback;
+  if (accounts.logins.length === 1 && !pinIsStale) return fallback;
+
+  const answer = (
+    await prompts.input(
+      `GitHub account for this repo (${accounts.logins.join(", ")})`,
+      fallback ?? "",
+    )
+  ).trim();
+  const login = accounts.logins.find((candidate) => candidate === answer);
+  if (login === undefined) {
+    throw new Error(`GitHub account must be one of: ${accounts.logins.join(", ")}.`);
+  }
+  return login;
+}
+
+async function promptGithubToken(
+  envPath: string,
+  prompts: SetupPrompts | null,
+  notices: string[],
+): Promise<boolean> {
+  const name = "GITHUB_TOKEN";
+  if (
+    prompts === null ||
+    !(await prompts.confirm(
+      `Configure local ${name} now? (or run \`gh auth login\`)`,
+      false,
+    ))
+  ) {
+    notices.push(
+      `Local ${name} is not configured; add it to .codex-cage.env or run \`gh auth login\`, then rerun setup.`,
+    );
+    return false;
+  }
+  const value = await prompts.secret(name);
+  if (value === "") {
+    notices.push(`Skipped empty local ${name}.`);
+    return false;
+  }
+  await mergeEnvSecret(envPath, name, value);
+  return true;
 }
 
 async function mergeEnvSecret(path: string, name: string, value: string): Promise<void> {
@@ -527,9 +620,21 @@ async function configureGithubRepository(
   actions: CodexCageConfig["actions"],
   prompts: SetupPrompts | null,
   agents: AgentProviderByRole,
+  github: { login: GithubLogin | null; gh: GhRunner },
 ): Promise<string[]> {
   const notices: string[] = [];
-  const auth = await execa("gh", ["auth", "status"], { cwd, reject: false });
+  // Run gh as the repo's pinned account instead of whichever account is active.
+  let env: Record<string, string> = {};
+  if (github.login !== null) {
+    const token = await ghAuthToken(github.login, github.gh);
+    if (token === null) {
+      return [
+        `gh is not signed in as ${github.login}; run \`gh auth login\`, then rerun setup.`,
+      ];
+    }
+    env = { GH_TOKEN: token };
+  }
+  const auth = await execa("gh", ["auth", "status"], { cwd, env, reject: false });
   if (auth.exitCode !== 0) {
     return ["GitHub CLI is not authenticated; run `gh auth login`, then rerun setup."];
   }
@@ -553,13 +658,14 @@ async function configureGithubRepository(
         description,
         "--force",
       ],
-      { cwd, reject: false },
+      { cwd, env, reject: false },
     );
     if (label.exitCode !== 0) notices.push(`Could not create GitHub label ${name}.`);
   }
 
   const secretList = await execa("gh", ["secret", "list", "--json", "name"], {
     cwd,
+    env,
     reject: false,
   });
   const configured =
@@ -583,6 +689,7 @@ async function configureGithubRepository(
     }
     const secret = await execa("gh", ["secret", "set", name], {
       cwd,
+      env,
       input: value,
       reject: false,
     });

@@ -17,6 +17,7 @@ import {
   type DockerSandbox,
   type DockerSandboxOptions,
 } from "./docker.js";
+import { ghTokenLookup, type GithubTokenLookup } from "./github-auth.js";
 import { fetchIssueContext } from "./issue.js";
 import { generateBranchName, type publishSuccessfulRun } from "./publish.js";
 import { buildPromptContext } from "./prompt-context.js";
@@ -66,6 +67,7 @@ export type RunCodexCageDependencies = {
   publishSuccessfulRun?: typeof publishSuccessfulRun;
   generateRunId?: () => string;
   findCodexAuthFile?: typeof findCodexAuthFile;
+  findGithubToken?: GithubTokenLookup;
   onProgress?: (event: RunProgressEvent) => void;
   onEvent?: RunEventSink;
   // Overrides mode resolution (env > config > docker). Tests pin this so they
@@ -147,6 +149,7 @@ async function prepareRuntimeContext(
     agents: { implement: agents.implement.provider, review: agents.review.provider },
     readEnv,
     findCodexAuthFile: locateCodexAuthFile,
+    findGithubToken: dependencies.findGithubToken ?? ghTokenLookup,
   });
   const issue = await fetchContext(
     options.issueUrl,

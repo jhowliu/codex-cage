@@ -6,6 +6,12 @@ import {
   type AgentProvider,
   type AgentRole,
 } from "./agent/providers.js";
+import {
+  githubAccountEnvName,
+  githubAccountLogin,
+  githubAccountSetting,
+  type GithubTokenLookup,
+} from "./github-auth.js";
 import { createSecretRedactor, readCodexCageEnv, readEnvFile } from "./guards.js";
 import type { CommentSelection, FetchIssueContextOptions } from "./issue.js";
 
@@ -35,6 +41,7 @@ export type RunCredentialsInput = {
   agents: AgentProviderByRole;
   readEnv: (cwd: string) => Promise<Record<string, string>>;
   findCodexAuthFile: () => Promise<string | null>;
+  findGithubToken: GithubTokenLookup;
 };
 
 export class RunCredentials {
@@ -99,13 +106,45 @@ const issueTrackerEnvNames: ReadonlySet<string> = new Set(["LINEAR_API_KEY"]);
 export async function prepareRunCredentials(
   input: RunCredentialsInput,
 ): Promise<RunCredentials> {
-  const secrets = normalizeCredentialEnv(await input.readEnv(input.cwd));
+  const env = normalizeCredentialEnv(await input.readEnv(input.cwd));
+  const secrets = await withGithubToken(env, input.findGithubToken);
   const needsCodexAuthFile =
     agentProvidersInUse(input.agents).has("codex") &&
     secrets.OPENAI_API_KEY === undefined;
   const codexAuthFilePath = needsCodexAuthFile ? await input.findCodexAuthFile() : null;
 
   return new RunCredentials({ secrets, agents: input.agents, codexAuthFilePath });
+}
+
+/**
+ * Removes the gh account setting and, when no GitHub token is configured,
+ * fills GITHUB_TOKEN from `gh auth token` for the pinned (or active) account.
+ */
+async function withGithubToken(
+  env: Record<string, string>,
+  findGithubToken: GithubTokenLookup,
+): Promise<Record<string, string>> {
+  const setting = githubAccountSetting(env);
+  if (setting.status === "invalid") {
+    throw new Error(
+      `${githubAccountEnvName} in .codex-cage.env must be a GitHub login, got "${setting.value}".`,
+    );
+  }
+  const secrets = Object.fromEntries(
+    Object.entries(env).filter(([name]) => name !== githubAccountEnvName),
+  );
+  if (githubTokenFromEnv(secrets) !== undefined) return secrets;
+
+  const login = githubAccountLogin(setting);
+  const token = await findGithubToken(login);
+  if (token !== null) return normalizeCredentialEnv({ ...secrets, GITHUB_TOKEN: token });
+  if (login !== null) {
+    throw new Error(
+      `gh has no github.com token for ${login} (${githubAccountEnvName}); run \`gh auth login\` as ${login} or set GITHUB_TOKEN in .codex-cage.env.`,
+    );
+  }
+  // No token anywhere: createAuthenticatedRepo reports the missing token.
+  return secrets;
 }
 
 export function normalizeCredentialEnv(
