@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { codexExecCommand } from "../src/agent/codex.js";
+import { createDockerSandbox } from "../src/docker.js";
 import {
+  createDockerShellRunner,
   createHostShellRunner,
   createHostWorkspace,
   createLineStreamSink,
@@ -21,6 +23,75 @@ async function withWorkspace(
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+async function withProcessEnv(
+  overrides: Record<string, string | undefined>,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = Object.fromEntries(
+    Object.keys(overrides).map((name) => [name, process.env[name]]),
+  );
+  const apply = (values: Record<string, string | undefined>): void => {
+    for (const [name, value] of Object.entries(values)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  };
+  apply(overrides);
+  try {
+    await fn();
+  } finally {
+    apply(previous);
+  }
+}
+
+function testSandbox() {
+  return createDockerSandbox(
+    { runId: "run-test", cloneUrl: "https://github.com/acme/app.git", image: "img" },
+    { run: async () => {} },
+  );
+}
+
+test("docker shell runner finds the docker CLI and daemon from the host environment", async () => {
+  await withWorkspace(async (binDir) => {
+    // A fake docker CLI that reports what the real one would need to reach the daemon.
+    await writeFile(
+      join(binDir, "docker"),
+      '#!/bin/sh\nprintf "%s|%s|%s" "${HOME:-unset}" "${DOCKER_HOST:-unset}" "${GITHUB_TOKEN:-unset}"\n',
+    );
+    await chmod(join(binDir, "docker"), 0o755);
+
+    await withProcessEnv(
+      {
+        PATH: `${binDir}:/usr/bin:/bin`,
+        HOME: "/home/tester",
+        DOCKER_HOST: "unix:///tmp/docker.sock",
+        GITHUB_TOKEN: "ambient-secret",
+      },
+      async () => {
+        const runner = createDockerShellRunner(testSandbox(), {});
+
+        const result = await runner.run("true", { env: { GITHUB_TOKEN: "run-token" } });
+
+        assert.equal(result.exitCode, 0);
+        assert.equal(result.stdout, "/home/tester|unix:///tmp/docker.sock|run-token");
+      },
+    );
+  });
+});
+
+test("docker shell runner reports why the docker CLI could not start", async () => {
+  await withWorkspace(async (emptyDir) => {
+    await withProcessEnv({ PATH: emptyDir }, async () => {
+      const runner = createDockerShellRunner(testSandbox(), {});
+
+      const result = await runner.run("true");
+
+      assert.equal(result.exitCode, 1);
+      assert.match(result.stderr, /ENOENT/);
+    });
+  });
+});
 
 test("host shell runner runs commands in the workspace directory", async () => {
   await withWorkspace(async (workspacePath) => {
