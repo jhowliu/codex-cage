@@ -1,12 +1,22 @@
 import { execa } from "execa";
 import { access, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { agentProvidersInUse, type AgentProvider } from "./agent/providers.js";
-import type { CodexCageConfig } from "./config.js";
+import { codexHomePath } from "./agent/codex.js";
+import {
+  agentFailureCode,
+  agentProvidersInUse,
+  agentRoles,
+  agentShellCommand,
+  defaultAgentModels,
+  type AgentAssignment,
+  type AgentProvider,
+  type AgentRole,
+} from "./agent/providers.js";
+import { resolveExecutionMode, type CodexCageConfig } from "./config.js";
 import { loadCodexCageConfigFile } from "./config-file.js";
 import {
+  credentialsForCommand,
   githubTokenFromEnv,
   globalCredentialNames,
   globalCredentialsPath,
@@ -15,7 +25,9 @@ import {
   type AgentProviderByRole,
   type CredentialEnv,
 } from "./credentials.js";
+import { dockerOneShotArgs } from "./docker.js";
 import { requiredActionsSecretGroups } from "./github-actions.js";
+import { createSecretRedactor } from "./guards.js";
 import {
   ghAuthToken,
   githubAccountEnvName,
@@ -41,15 +53,28 @@ export type DoctorCommandResult = {
   stderr: string;
 };
 
+export type DoctorCommandOptions = {
+  /** Added to the process environment, e.g. credentials a probe forwards to Docker. */
+  env?: Record<string, string>;
+  timeoutMs?: number;
+};
+
 export type DoctorCommandRunner = (
   command: string,
   args: readonly string[],
   cwd: string,
+  options?: DoctorCommandOptions,
 ) => Promise<DoctorCommandResult>;
+
+export type DoctorOptions = {
+  /** Make one minimal call per configured agent in the runtime image. */
+  probe?: boolean;
+};
 
 export async function doctorProject(
   cwd: string,
   runCommand: DoctorCommandRunner = defaultCommandRunner,
+  options: DoctorOptions = {},
 ): Promise<DoctorResult> {
   const checks: DoctorCheck[] = [];
   const configState = await loadCodexCageConfigFile(cwd);
@@ -95,7 +120,7 @@ export async function doctorProject(
   const credentialEnv = await readCredentialEnv(cwd, globalPath);
   const env = credentialEnv.env;
   checks.push(...(await globalCredentialsChecks(globalPath, credentialEnv)));
-  const codexAuthFileAvailable = await readable(join(homedir(), ".codex", "auth.json"));
+  const codexAuthFileAvailable = await readable(join(codexHomePath(), "auth.json"));
   for (const provider of agentProvidersInUse(agents)) {
     checks.push(
       agentAuthCheck(provider, {
@@ -106,6 +131,23 @@ export async function doctorProject(
   }
   checks.push(await githubAuthCheck(env, (args) => runCommand("gh", args, cwd)));
 
+  if (options.probe === true) {
+    checks.push(
+      ...(await agentProbeChecks({
+        cwd,
+        config: configState.config,
+        env,
+        agents,
+        codexAuthFilePath: codexAuthFileAvailable
+          ? join(codexHomePath(), "auth.json")
+          : undefined,
+        dockerAvailable: docker.exitCode === 0,
+        globalPath,
+        runCommand,
+      })),
+    );
+  }
+
   if (configState.config.actions.enabled) {
     await checkActions(cwd, configState.config.actions, agents, checks, runCommand);
   } else {
@@ -113,6 +155,148 @@ export async function doctorProject(
   }
 
   return result(checks);
+}
+
+const probeOutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok"],
+  properties: { ok: { type: "boolean" } },
+} as const satisfies Record<string, unknown>;
+
+const probeTimeoutMs = 3 * 60 * 1000;
+
+/**
+ * Runs each distinct agent assignment once, the way a run invokes it: in the
+ * runtime image, with only that provider's credentials, read-only, with a
+ * structured-output schema. Catches rejected credentials, unavailable models,
+ * and agent CLIs too old for the configured model before a run does.
+ */
+async function agentProbeChecks(input: {
+  cwd: string;
+  config: CodexCageConfig;
+  env: Record<string, string>;
+  agents: AgentProviderByRole;
+  codexAuthFilePath: string | undefined;
+  dockerAvailable: boolean;
+  globalPath: string;
+  runCommand: DoctorCommandRunner;
+}): Promise<DoctorCheck[]> {
+  if (resolveExecutionMode({ env: process.env, config: input.config }) === "direct") {
+    return [
+      warning(
+        "agent-probe",
+        "Skipped: direct mode runs agents on the CI runner, not in a local container.",
+      ),
+    ];
+  }
+  if (!input.dockerAvailable) {
+    return [warning("agent-probe", "Skipped: Docker is unavailable.")];
+  }
+
+  const image = input.config.runtime.image;
+  const redact = createSecretRedactor(input.env);
+  const checks: DoctorCheck[] = [];
+
+  for (const { agent, roles } of distinctAssignments(input.config.agent)) {
+    const credentials = credentialsForCommand(roles[0], {
+      env: input.env,
+      agents: input.agents,
+      codexAuthFilePath: input.codexAuthFilePath,
+    });
+    const command = `cd "$(mktemp -d)" && git init -q && ${agentShellCommand(agent, {
+      access: "read-only",
+      prompt: "Set ok to true.",
+      executionMode: "docker",
+      outputSchema: probeOutputSchema,
+    })}`;
+    const result = await input.runCommand(
+      "docker",
+      dockerOneShotArgs({
+        image,
+        env: credentials.env,
+        codexAuthFilePath: credentials.codexAuthFilePath,
+        command,
+      }),
+      input.cwd,
+      { env: credentials.env, timeoutMs: probeTimeoutMs },
+    );
+    const name = `agent-probe:${roles.join("+")}`;
+    const label = `${agent.provider} ${agent.model}`;
+    checks.push(
+      result.exitCode === 0
+        ? pass(name, `${label} answered in ${image}.`)
+        : fail(
+            name,
+            redact(
+              probeFailureMessage({
+                agent,
+                label,
+                image,
+                result,
+                globalPath: input.globalPath,
+              }),
+            ),
+          ),
+    );
+  }
+
+  return checks;
+}
+
+function distinctAssignments(
+  assignments: Record<AgentRole, AgentAssignment>,
+): { agent: AgentAssignment; roles: [AgentRole, ...AgentRole[]] }[] {
+  const groups: { agent: AgentAssignment; roles: [AgentRole, ...AgentRole[]] }[] = [];
+  for (const role of agentRoles) {
+    const agent = assignments[role];
+    const group = groups.find(
+      (candidate) =>
+        candidate.agent.provider === agent.provider &&
+        candidate.agent.model === agent.model,
+    );
+    if (group === undefined) groups.push({ agent, roles: [role] });
+    else group.roles.push(role);
+  }
+  return groups;
+}
+
+function probeFailureMessage(input: {
+  agent: AgentAssignment;
+  label: string;
+  image: string;
+  result: DoctorCommandResult;
+  globalPath: string;
+}): string {
+  const code = agentFailureCode(input.agent.provider, input.result);
+  switch (code) {
+    case "agent_auth_failed":
+      return input.agent.provider === "claude"
+        ? `Claude Code rejected its credentials. Run \`claude setup-token\` and update CLAUDE_CODE_OAUTH_TOKEN in ${input.globalPath}.`
+        : `Codex rejected its credentials. Check OPENAI_API_KEY in ${input.globalPath}, or run \`codex login\`.`;
+    case "agent_model_unavailable":
+      return [
+        `${input.label} is not available to this account, or the CLI in ${input.image} is too old for it.`,
+        input.agent.provider === "codex" && input.agent.model === defaultAgentModels.codex
+          ? `A ChatGPT-account Codex login cannot use ${defaultAgentModels.codex}; set OPENAI_API_KEY or pick a model your account offers.`
+          : "",
+        "Change the model in .codex-cage.yml or update the image.",
+      ]
+        .filter((part) => part !== "")
+        .join(" ");
+    case null: {
+      const output = `${input.result.stderr}\n${input.result.stdout}`
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line !== "");
+      const detail = output.at(-1)?.slice(0, 300) ?? "no output";
+      return `${input.label} failed in ${input.image} (exit ${input.result.exitCode}): ${detail}`;
+    }
+    default: {
+      const exhaustiveCode: never = code;
+      return exhaustiveCode;
+    }
+  }
 }
 
 async function githubAuthCheck(
@@ -290,11 +474,18 @@ async function defaultCommandRunner(
   command: string,
   args: readonly string[],
   cwd: string,
+  options: DoctorCommandOptions = {},
 ): Promise<DoctorCommandResult> {
   try {
-    const commandResult = await execa(command, args, { cwd, reject: false });
+    const commandResult = await execa(command, args, {
+      cwd,
+      reject: false,
+      ...(options.env === undefined ? {} : { env: options.env }),
+      ...(options.timeoutMs === undefined ? {} : { timeout: options.timeoutMs }),
+    });
     return {
-      exitCode: commandResult.exitCode ?? 0,
+      // No exit code means the command never started or was killed.
+      exitCode: commandResult.exitCode ?? 1,
       stdout: commandResult.stdout,
       stderr: commandResult.stderr,
     };

@@ -199,7 +199,7 @@ actions:
 
 `verify` must contain at least one command. Setup detects common package scripts and refuses to write a new configuration when no verification command can be selected.
 
-`agent.implement` and `agent.review` each pick a `provider` (`claude` or `codex`) and an optional `model` (default `claude-opus-5-5` for Claude, `gpt-5.4-mini` for Codex). A new config from `codex-cage setup` implements with Claude and reviews with Codex; non-interactive setup falls back to Codex for implementation when no Claude credential is found. A config without these keys keeps the original behavior: Codex for both roles, with the legacy `agent.model` as the Codex model. `codex-cage run --model` overrides only the implementation model.
+`agent.implement` and `agent.review` each pick a `provider` (`claude` or `codex`) and an optional `model` (default `claude-opus-5-5` for Claude, `gpt-5.4-mini` for Codex). A new config from `codex-cage setup` implements with Claude and reviews with Codex; non-interactive setup falls back to Codex for implementation when no Claude credential is found. A Codex login with a ChatGPT account cannot use `gpt-5.4-mini`, so when there is no `OPENAI_API_KEY`, setup takes the Codex model from the top-level `model` in `$CODEX_HOME/config.toml` (default `~/.codex/config.toml`). A config without these keys keeps the original behavior: Codex for both roles, with the legacy `agent.model` as the Codex model. `codex-cage run --model` overrides only the implementation model.
 
 Codex review runs in Codex's read-only sandbox. Claude Code has no OS-level sandbox, so Claude implementation runs with permission prompts disabled inside the Docker sandbox, and a Claude review is limited to read-only tools (`Read`, `Grep`, `Glob`, read-only `git`); in both cases a review that changes the diff fails the run.
 
@@ -212,9 +212,12 @@ Codex review runs in Codex's read-only sandbox. Claude Code has no OS-level sand
 ```bash
 codex-cage doctor
 codex-cage doctor --json
+codex-cage doctor --probe
 ```
 
 Doctor validates the shared config, Git repository, Docker daemon, local credentials, generated workflow, GitHub CLI authentication, issue labels, and required Actions secret names. Warnings describe optional local gaps; failed checks return a non-zero exit code.
+
+`--probe` also makes one minimal call per configured agent, the way a run does: in `runtime.image`, with only that provider's credentials, read-only, with structured output. It takes a few seconds and a few tokens. It catches problems that a credential check that only looks at files misses: an expired or invalid token, a model the account cannot use, and an agent CLI in the image that is too old for the model. Roles that share a provider and model are probed once. Direct mode skips the probe, because agents run on the CI runner. Interactive `codex-cage setup` runs the probe at the end; `setup --yes` does not.
 
 ## Docker Compose Services
 

@@ -110,15 +110,15 @@ codex-cage runs show <run-id>
 
 Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI help.
 
-| Command                         | Purpose                                                                   |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| `codex-cage setup`              | Configure local Docker runs and optional GitHub Actions automation.       |
-| `codex-cage doctor`             | Diagnose local tools, credentials, workflow, labels, and Actions secrets. |
-| `codex-cage run <issue-url>`    | Run the full issue-to-PR workflow for a GitHub or Linear issue.           |
-| `codex-cage runs list`          | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.          |
-| `codex-cage runs show <run-id>` | Show run metadata, phase status, and artifact paths.                      |
-| `codex-cage cleanup`            | Remove stale stopped Docker resources managed by Codex Cage.              |
-| `codex-cage cleanup --all`      | Remove all managed Docker resources, including active ones.               |
+| Command                         | Purpose                                                                                                         |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `codex-cage setup`              | Configure local Docker runs and optional GitHub Actions automation.                                             |
+| `codex-cage doctor`             | Diagnose local tools, credentials, workflow, labels, and Actions secrets; `--probe` also test-calls each agent. |
+| `codex-cage run <issue-url>`    | Run the full issue-to-PR workflow for a GitHub or Linear issue.                                                 |
+| `codex-cage runs list`          | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.                                                |
+| `codex-cage runs show <run-id>` | Show run metadata, phase status, and artifact paths.                                                            |
+| `codex-cage cleanup`            | Remove stale stopped Docker resources managed by Codex Cage.                                                    |
+| `codex-cage cleanup --all`      | Remove all managed Docker resources, including active ones.                                                     |
 
 ### Configure a Target Repo
 

@@ -406,6 +406,37 @@ export function dockerRunArgs(input: DockerRunArgsInput): string[] {
   ];
 }
 
+export type DockerOneShotArgsInput = {
+  image: string;
+  env: Record<string, string>;
+  codexAuthFilePath?: string | undefined;
+  command: string;
+};
+
+/**
+ * `docker run` for a throwaway container with no workspace volume or run
+ * network, such as a doctor probe. Credentials are forwarded by name as in
+ * dockerRunArgs.
+ */
+export function dockerOneShotArgs(input: DockerOneShotArgsInput): string[] {
+  return [
+    "run",
+    "--rm",
+    ...labelArgs({}),
+    "--user",
+    "agent",
+    ...codexAuthMountArgs(input.codexAuthFilePath),
+    ...envArgs(input.env),
+    input.image,
+    "sh",
+    "-lc",
+    commandWithGitHubAuth(
+      commandWithCodexAuth(input.command, input.codexAuthFilePath, input.env),
+      input.env,
+    ),
+  ];
+}
+
 function commandWithAuth(command: string, input: DockerRunArgsInput): string {
   return commandWithGitHubAuth(
     commandWithCodexAuth(command, input.codexAuthFilePath, input.env),
