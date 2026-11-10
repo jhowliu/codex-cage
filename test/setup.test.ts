@@ -61,6 +61,9 @@ function signedInGh(
 const configHome = await mkdtemp(join(tmpdir(), "codex-cage-config-"));
 process.env.XDG_CONFIG_HOME = configHome;
 const globalEnvPath = join(configHome, "codex-cage", "env");
+// Setup reads the Codex login and config.toml; keep the developer's out of it.
+const codexHome = await mkdtemp(join(tmpdir(), "codex-cage-codex-home-"));
+process.env.CODEX_HOME = codexHome;
 
 async function tempRepo(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-setup-"));
@@ -595,6 +598,85 @@ test("setup adds no runtime Dockerfile for an npm project", async () => {
       /ENOENT/,
     );
   } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+async function withCodexLogin(
+  configToml: string | null,
+  fn: () => Promise<void>,
+): Promise<void> {
+  await writeFile(join(codexHome, "auth.json"), "{}\n", "utf8");
+  if (configToml !== null)
+    await writeFile(join(codexHome, "config.toml"), configToml, "utf8");
+  try {
+    await fn();
+  } finally {
+    await rm(join(codexHome, "auth.json"), { force: true });
+    await rm(join(codexHome, "config.toml"), { force: true });
+  }
+}
+
+async function codexModels(cwd: string): Promise<{ implement: string; review: string }> {
+  const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
+    agent: { implement: { model: string }; review: { model: string } };
+  };
+  return { implement: config.agent.implement.model, review: config.agent.review.model };
+}
+
+test("setup takes the Codex model from config.toml for a ChatGPT login", async () => {
+  const cwd = await tempRepo();
+  try {
+    await rm(globalEnvPath, { force: true });
+    await withCodexLogin(
+      'model = "gpt-6.1-sol"\n\n[profiles.fast]\nmodel = "other"\n',
+      async () => {
+        const result = await setup(cwd, { yes: true, actions: false });
+
+        // Without Claude credentials both roles use Codex, so both get the model.
+        assert.deepEqual(await codexModels(cwd), {
+          implement: "gpt-6.1-sol",
+          review: "gpt-6.1-sol",
+        });
+        assert.ok(
+          result.notices.some((notice) => notice.includes("Codex uses gpt-6.1-sol")),
+        );
+      },
+    );
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup warns when a ChatGPT login has no model in config.toml", async () => {
+  const cwd = await tempRepo();
+  try {
+    await rm(globalEnvPath, { force: true });
+    await withCodexLogin(null, async () => {
+      const result = await setup(cwd, { yes: true, actions: false });
+
+      assert.equal((await codexModels(cwd)).review, "gpt-5.4-mini");
+      assert.ok(
+        result.notices.some((notice) => notice.includes("cannot use gpt-5.4-mini")),
+      );
+    });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup keeps the API default Codex model when OPENAI_API_KEY is set", async () => {
+  const cwd = await tempRepo();
+  try {
+    await mkdir(join(configHome, "codex-cage"), { recursive: true });
+    await writeFile(globalEnvPath, "OPENAI_API_KEY=sk-test\n", "utf8");
+    await withCodexLogin('model = "gpt-6.1-sol"\n', async () => {
+      await setup(cwd, { yes: true, actions: false });
+
+      assert.equal((await codexModels(cwd)).review, "gpt-5.4-mini");
+    });
+  } finally {
+    await rm(globalEnvPath, { force: true });
     await rm(cwd, { recursive: true, force: true });
   }
 });

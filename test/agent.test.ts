@@ -5,7 +5,7 @@ import {
   claudeFailureCode,
   extractClaudeResult,
 } from "../src/agent/claude.js";
-import { codexFailureCode } from "../src/agent/codex.js";
+import { codexConfigModel, codexFailureCode } from "../src/agent/codex.js";
 import {
   agentFailureCode,
   agentShellCommand,
@@ -167,4 +167,13 @@ test("agentFailureCode reads Claude stdout and Codex stderr", () => {
     }),
     "agent_model_unavailable",
   );
+});
+
+test("codexConfigModel reads the top-level model only", () => {
+  assert.equal(
+    codexConfigModel('model = "gpt-6.1-sol"\nmodel_reasoning_effort = "max"\n'),
+    "gpt-6.1-sol",
+  );
+  assert.equal(codexConfigModel('[profiles.fast]\nmodel = "other"\n'), null);
+  assert.equal(codexConfigModel('approval_policy = "never"\n'), null);
 });

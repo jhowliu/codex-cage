@@ -10,6 +10,8 @@ import { GENERATED_WORKFLOW_MARKER } from "../src/setup.js";
 const configHome = await mkdtemp(join(tmpdir(), "codex-cage-config-"));
 process.env.XDG_CONFIG_HOME = configHome;
 const globalEnvPath = join(configHome, "codex-cage", "env");
+// Keep the developer's real Codex login out of these tests.
+process.env.CODEX_HOME = await mkdtemp(join(tmpdir(), "codex-cage-codex-home-"));
 
 const quietRunner: DoctorCommandRunner = async () => ({
   exitCode: 0,
@@ -216,5 +218,188 @@ test("doctor reports which gh account local runs use", async () => {
     assert.equal(tokenCalls.length, calls);
   } finally {
     await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+async function probeProject(config: string): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  await writeFile(join(cwd, ".codex-cage.yml"), config, "utf8");
+  await mkdir(join(configHome, "codex-cage"), { recursive: true });
+  await writeFile(
+    globalEnvPath,
+    "CLAUDE_CODE_OAUTH_TOKEN=claude-secret\nOPENAI_API_KEY=sk-secret\n",
+    "utf8",
+  );
+  return cwd;
+}
+
+// Answers like quietRunner, except agent probes (`docker run`) get `probe`.
+function probeRunner(
+  probe: (args: readonly string[]) => {
+    exitCode: number;
+    stdout: string;
+    stderr: string;
+  },
+  calls: { args: readonly string[]; env: Record<string, string> | undefined }[] = [],
+): DoctorCommandRunner {
+  return async (command, args, cwd, options) => {
+    if (command === "docker" && args[0] === "run") {
+      calls.push({ args, env: options?.env });
+      return probe(args);
+    }
+    return quietRunner(command, args, cwd);
+  };
+}
+
+const twoAgentConfig =
+  "verify:\n  - npm test\nruntime:\n  image: codex-cage/base:local\nagent:\n  implement:\n    provider: claude\n  review:\n    provider: codex\n    model: gpt-6.1-sol\n";
+
+test("doctor --probe runs each agent once in the runtime image with its own credentials", async () => {
+  const cwd = await probeProject(twoAgentConfig);
+  const calls: { args: readonly string[]; env: Record<string, string> | undefined }[] =
+    [];
+  try {
+    const result = await doctorProject(
+      cwd,
+      probeRunner(() => ({ exitCode: 0, stdout: "{}", stderr: "" }), calls),
+      { probe: true },
+    );
+    const probes = result.checks.filter((check) => check.name.startsWith("agent-probe"));
+
+    assert.equal(result.healthy, true);
+    assert.deepEqual(
+      probes.map((check) => [check.name, check.status]),
+      [
+        ["agent-probe:implement", "pass"],
+        ["agent-probe:review", "pass"],
+      ],
+    );
+    assert.equal(calls.length, 2);
+    const [claudeCall, codexCall] = calls;
+    assert.ok(claudeCall?.args.includes("codex-cage/base:local"));
+    assert.match(
+      claudeCall?.args.at(-1) ?? "",
+      /claude -p .*'--model' 'claude-opus-5-5'/,
+    );
+    assert.deepEqual(Object.keys(claudeCall?.env ?? {}), ["CLAUDE_CODE_OAUTH_TOKEN"]);
+    assert.match(codexCall?.args.at(-1) ?? "", /codex exec --model 'gpt-6\.1-sol'/);
+    assert.deepEqual(Object.keys(codexCall?.env ?? {}), ["OPENAI_API_KEY"]);
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe probes a shared agent assignment once", async () => {
+  const cwd = await probeProject("verify:\n  - npm test\n");
+  const calls: { args: readonly string[]; env: Record<string, string> | undefined }[] =
+    [];
+  try {
+    const result = await doctorProject(
+      cwd,
+      probeRunner(() => ({ exitCode: 0, stdout: "{}", stderr: "" }), calls),
+      { probe: true },
+    );
+
+    assert.equal(calls.length, 1);
+    assert.ok(
+      result.checks.some((check) => check.name === "agent-probe:implement+review"),
+    );
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe explains rejected credentials and unavailable models", async () => {
+  const cwd = await probeProject(twoAgentConfig);
+  try {
+    const result = await doctorProject(
+      cwd,
+      probeRunner((args) =>
+        (args.at(-1) ?? "").includes("claude -p")
+          ? {
+              exitCode: 1,
+              stdout:
+                '{"type":"result","is_error":true,"api_error_status":401,"result":"Failed to authenticate."}',
+              stderr: "",
+            }
+          : {
+              exitCode: 1,
+              stdout: "",
+              stderr:
+                "ERROR: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account. key=sk-secret",
+            },
+      ),
+      { probe: true },
+    );
+    const byName = new Map(result.checks.map((check) => [check.name, check]));
+
+    assert.equal(result.healthy, false);
+    assert.equal(byName.get("agent-probe:implement")?.status, "fail");
+    assert.match(
+      byName.get("agent-probe:implement")?.message ?? "",
+      /claude setup-token/,
+    );
+    assert.equal(byName.get("agent-probe:review")?.status, "fail");
+    assert.match(
+      byName.get("agent-probe:review")?.message ?? "",
+      /codex gpt-6\.1-sol is not available .* too old/,
+    );
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe reports other failures with the last output line, redacted", async () => {
+  const cwd = await probeProject("verify:\n  - npm test\n");
+  try {
+    const result = await doctorProject(
+      cwd,
+      probeRunner(() => ({
+        exitCode: 2,
+        stdout: "",
+        stderr: "starting\nboom with sk-secret",
+      })),
+      { probe: true },
+    );
+    const probe = result.checks.find((check) => check.name.startsWith("agent-probe"));
+
+    assert.equal(probe?.status, "fail");
+    assert.match(probe?.message ?? "", /exit 2\): boom with/);
+    assert.doesNotMatch(probe?.message ?? "", /sk-secret/);
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("doctor --probe skips agents when Docker is unavailable or in direct mode", async () => {
+  const docker = await probeProject("verify:\n  - npm test\n");
+  const direct = await probeProject("verify:\n  - npm test\nexecution: direct\n");
+  const noDocker: DoctorCommandRunner = async (command, args, cwd) =>
+    command === "docker"
+      ? { exitCode: 1, stdout: "", stderr: "" }
+      : quietRunner(command, args, cwd);
+  try {
+    const withoutDocker = await doctorProject(docker, noDocker, { probe: true });
+    const directMode = await doctorProject(
+      direct,
+      probeRunner(() => {
+        throw new Error("direct mode must not start a container");
+      }),
+      { probe: true },
+    );
+
+    for (const result of [withoutDocker, directMode]) {
+      const probe = result.checks.find((check) => check.name === "agent-probe");
+      assert.equal(probe?.status, "warning");
+      assert.match(probe?.message ?? "", /^Skipped/);
+    }
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(docker, { recursive: true, force: true });
+    await rm(direct, { recursive: true, force: true });
   }
 });

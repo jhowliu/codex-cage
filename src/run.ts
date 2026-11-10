@@ -1,8 +1,8 @@
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
+import { codexHomePath } from "./agent/codex.js";
 import type { AgentAssignments } from "./agent/providers.js";
 import type { createComposeProject } from "./compose.js";
 import {
@@ -234,7 +234,7 @@ async function readConfig(cwd: string): Promise<{
 }
 
 async function findCodexAuthFile(): Promise<string | null> {
-  const authFilePath = join(homedir(), ".codex", "auth.json");
+  const authFilePath = join(codexHomePath(), "auth.json");
 
   try {
     await access(authFilePath, constants.R_OK);

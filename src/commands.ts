@@ -59,7 +59,10 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         const color = createColorizer(process.stdout);
         printSetupResult(result, color);
         if (!result.dryRun) {
-          const diagnostics = await doctor(process.cwd());
+          // Interactive setup also probes the agents; --yes stays offline and token-free.
+          const diagnostics = await doctor(process.cwd(), undefined, {
+            probe: options.yes !== true,
+          });
           printDoctorResult(diagnostics, color);
           if (!diagnostics.healthy) process.exitCode = 1;
         }
@@ -70,8 +73,14 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .command("doctor")
     .description("Check local and GitHub Actions Codex Cage configuration.")
     .option("--json", "print the machine-readable diagnostic result")
-    .action(async (options: { json?: boolean }) => {
-      const result = await doctor(process.cwd());
+    .option(
+      "--probe",
+      "make one minimal call per configured agent in the runtime image (uses a few tokens)",
+    )
+    .action(async (options: { json?: boolean; probe?: boolean }) => {
+      const result = await doctor(process.cwd(), undefined, {
+        probe: options.probe === true,
+      });
       if (options.json === true) {
         console.log(JSON.stringify(result, null, 2));
       } else {

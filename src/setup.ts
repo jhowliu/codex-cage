@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { Writable } from "node:stream";
-import { homedir } from "node:os";
+import { codexConfigModel, codexHomePath } from "./agent/codex.js";
 import {
   agentProviders,
   agentProvidersInUse,
@@ -286,10 +286,14 @@ async function chooseNewAgentConfig(
   notices: string[],
 ): Promise<CodexCageConfig["agent"]> {
   const implement = await chooseImplementationAgent(cwd, prompts, notices);
+  const codexModel = await chooseCodexModel(cwd, notices);
 
   return {
-    implement: { provider: implement, model: defaultAgentModels[implement] },
-    review: { provider: "codex", model: defaultAgentModels.codex },
+    implement: {
+      provider: implement,
+      model: implement === "codex" ? codexModel : defaultAgentModels[implement],
+    },
+    review: { provider: "codex", model: codexModel },
     max_iterations: 5,
     max_review_cycles: 2,
   };
@@ -323,6 +327,37 @@ async function chooseImplementationAgent(
     "Claude Code credentials were not found, so implementation uses Codex. Run `claude setup-token`, then rerun setup interactively to switch.",
   );
   return "codex";
+}
+
+/**
+ * A ChatGPT-account Codex login cannot use the API default model, so without
+ * OPENAI_API_KEY the model comes from the user's Codex config instead.
+ */
+async function chooseCodexModel(cwd: string, notices: string[]): Promise<string> {
+  const { env } = await readCredentialEnv(cwd);
+  const codexHome = codexHomePath();
+  if (
+    env.OPENAI_API_KEY !== undefined ||
+    !(await fileExists(join(codexHome, "auth.json")))
+  ) {
+    return defaultAgentModels.codex;
+  }
+
+  const configPath = join(codexHome, "config.toml");
+  const model = (await fileExists(configPath))
+    ? codexConfigModel(await readFile(configPath, "utf8"))
+    : null;
+  if (model === null) {
+    notices.push(
+      `Codex is signed in with a ChatGPT account, which cannot use ${defaultAgentModels.codex}. Set agent.review.model to a model your account offers, or add OPENAI_API_KEY to ${globalCredentialsPath()}.`,
+    );
+    return defaultAgentModels.codex;
+  }
+
+  notices.push(
+    `Codex uses ${model} from ${configPath}, because a ChatGPT-account login cannot use ${defaultAgentModels.codex}.`,
+  );
+  return model;
 }
 
 function isAgentProvider(value: string): value is AgentProvider {
@@ -362,7 +397,7 @@ async function configureLocalCredentials(
   const envExists = await fileExists(envPath);
   const globalPath = globalCredentialsPath();
   const { env } = await readCredentialEnv(cwd, globalPath);
-  const codexAuthFileAvailable = await fileExists(join(homedir(), ".codex", "auth.json"));
+  const codexAuthFileAvailable = await fileExists(join(codexHomePath(), "auth.json"));
   const missingAgentCredentials = [...agentProvidersInUse(agents)]
     .filter((provider) => !hasAgentCredentials(provider, { env, codexAuthFileAvailable }))
     .map((provider) => agentCredentialPrompt(provider));
