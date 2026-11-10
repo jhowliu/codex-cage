@@ -5,6 +5,12 @@ import { dirname, join, relative, resolve } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { Writable } from "node:stream";
 import { homedir } from "node:os";
+import {
+  agentProviders,
+  agentProvidersInUse,
+  defaultAgentModels,
+  type AgentProvider,
+} from "./agent/providers.js";
 import type { CodexCageConfig } from "./config.js";
 import {
   loadCodexCageConfigFile,
@@ -12,11 +18,17 @@ import {
   type CodexCageConfigUpdates,
 } from "./config-file.js";
 import {
+  globalCredentialsPath,
+  hasAgentCredentials,
+  readCredentialEnv,
+  type AgentProviderByRole,
+} from "./credentials.js";
+import {
   generateGitHubActionsWorkflow,
+  requiredActionsSecretGroups,
   type GitHubActionsRuntime,
 } from "./github-actions.js";
 import { readPackageVersion } from "./version.js";
-import { readCodexCageEnv } from "./guards.js";
 
 export type SetupOptions = {
   yes?: boolean;
@@ -119,6 +131,15 @@ export async function setupProject(
             existing?.actions.enabled ?? false,
           ));
     const actions = buildActionsConfig(existing, actionsEnabled);
+    // Existing configs keep their agents (including the Codex-only default);
+    // only a new config picks Claude for implementation.
+    const agentNotices: string[] = [];
+    const agent =
+      existing?.agent ?? (await chooseNewAgentConfig(cwd, prompt, agentNotices));
+    const agents: AgentProviderByRole = {
+      implement: agent.implement.provider,
+      review: agent.review.provider,
+    };
     const updates = {
       setup,
       verify,
@@ -129,6 +150,7 @@ export async function setupProject(
       },
       execution: "docker",
       actions,
+      ...(existing === null ? { agent } : {}),
     } satisfies CodexCageConfigUpdates;
 
     if (prompt !== null && !(await prompt.confirm("Apply this configuration?", true))) {
@@ -146,11 +168,13 @@ export async function setupProject(
       cwd,
       configState,
       updates,
+      agents,
       options.dryRun ?? false,
     );
+    setupResult.notices.push(...agentNotices);
     if (!setupResult.dryRun) {
       setupResult.notices.push(
-        ...(await configureLocalCredentials(cwd, prompt, setupResult)),
+        ...(await configureLocalCredentials(cwd, prompt, setupResult, agents)),
       );
     }
     const configureGithub =
@@ -164,7 +188,7 @@ export async function setupProject(
             )));
     if (configureGithub && !setupResult.dryRun) {
       setupResult.notices.push(
-        ...(await configureGithubRepository(cwd, actions, prompt)),
+        ...(await configureGithubRepository(cwd, actions, prompt, agents)),
       );
     }
     return setupResult;
@@ -173,32 +197,98 @@ export async function setupProject(
   }
 }
 
+async function chooseNewAgentConfig(
+  cwd: string,
+  prompts: SetupPrompts | null,
+  notices: string[],
+): Promise<CodexCageConfig["agent"]> {
+  const implement = await chooseImplementationAgent(cwd, prompts, notices);
+
+  return {
+    implement: { provider: implement, model: defaultAgentModels[implement] },
+    review: { provider: "codex", model: defaultAgentModels.codex },
+    max_iterations: 5,
+    max_review_cycles: 2,
+  };
+}
+
+async function chooseImplementationAgent(
+  cwd: string,
+  prompts: SetupPrompts | null,
+  notices: string[],
+): Promise<AgentProvider> {
+  if (prompts !== null) {
+    const answer = (
+      await prompts.input("Implementation agent (claude or codex)", "claude")
+    )
+      .trim()
+      .toLowerCase();
+    if (!isAgentProvider(answer)) {
+      throw new Error(
+        `Implementation agent must be one of: ${agentProviders.join(", ")}.`,
+      );
+    }
+    return answer;
+  }
+
+  const { env } = await readCredentialEnv(cwd);
+  if (hasAgentCredentials("claude", { env, codexAuthFileAvailable: false })) {
+    return "claude";
+  }
+
+  notices.push(
+    "Claude Code credentials were not found, so implementation uses Codex. Run `claude setup-token`, then rerun setup interactively to switch.",
+  );
+  return "codex";
+}
+
+function isAgentProvider(value: string): value is AgentProvider {
+  return agentProviders.some((provider) => provider === value);
+}
+
+function agentCredentialPrompt(provider: AgentProvider): { name: string; hint: string } {
+  switch (provider) {
+    case "codex":
+      return { name: "OPENAI_API_KEY", hint: "or sign in with the Codex CLI" };
+    case "claude":
+      return {
+        name: "CLAUDE_CODE_OAUTH_TOKEN",
+        hint: "create one with `claude setup-token`",
+      };
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
+/**
+ * Agent credentials go to the machine-wide file so every repo can reuse them;
+ * GitHub credentials stay in the repo's `.codex-cage.env`.
+ */
 async function configureLocalCredentials(
   cwd: string,
   prompts: SetupPrompts | null,
   setupResult: SetupResult,
+  agents: AgentProviderByRole,
 ): Promise<string[]> {
   const notices: string[] = [];
   let changed = false;
   const envPath = join(cwd, ".codex-cage.env");
   const envExists = await fileExists(envPath);
-  const env = await readCodexCageEnv(cwd);
-  const needsOpenAi =
-    env.OPENAI_API_KEY === undefined &&
-    !(await fileExists(join(homedir(), ".codex", "auth.json")));
-  const missing = [
-    ...(needsOpenAi ? (["OPENAI_API_KEY"] as const) : []),
-    ...(env.GITHUB_TOKEN === undefined && env.GH_TOKEN === undefined
-      ? (["GITHUB_TOKEN"] as const)
-      : []),
-  ];
+  const globalPath = globalCredentialsPath();
+  const { env } = await readCredentialEnv(cwd, globalPath);
+  const codexAuthFileAvailable = await fileExists(join(homedir(), ".codex", "auth.json"));
+  const missingAgentCredentials = [...agentProvidersInUse(agents)]
+    .filter((provider) => !hasAgentCredentials(provider, { env, codexAuthFileAvailable }))
+    .map((provider) => agentCredentialPrompt(provider));
 
-  for (const name of missing) {
+  for (const { name, hint } of missingAgentCredentials) {
     if (
       prompts === null ||
-      !(await prompts.confirm(`Configure local ${name} now?`, false))
+      !(await prompts.confirm(`Configure local ${name} now? (${hint})`, false))
     ) {
-      notices.push(`Local ${name} is not configured; add it to .codex-cage.env.`);
+      notices.push(`Local ${name} is not configured; add it to ${globalPath} (${hint}).`);
       continue;
     }
     const value = await prompts.secret(name);
@@ -206,8 +296,26 @@ async function configureLocalCredentials(
       notices.push(`Skipped empty local ${name}.`);
       continue;
     }
-    await mergeEnvSecret(envPath, name, value);
-    changed = true;
+    await mergeEnvSecret(globalPath, name, value);
+    notices.push(`Saved ${name} to ${globalPath}.`);
+  }
+
+  if (env.GITHUB_TOKEN === undefined && env.GH_TOKEN === undefined) {
+    const name = "GITHUB_TOKEN";
+    if (
+      prompts === null ||
+      !(await prompts.confirm(`Configure local ${name} now?`, false))
+    ) {
+      notices.push(`Local ${name} is not configured; add it to .codex-cage.env.`);
+    } else {
+      const value = await prompts.secret(name);
+      if (value === "") {
+        notices.push(`Skipped empty local ${name}.`);
+      } else {
+        await mergeEnvSecret(envPath, name, value);
+        changed = true;
+      }
+    }
   }
 
   if (await fileExists(envPath)) {
@@ -344,6 +452,7 @@ async function applySetup(
     status: "missing" | "valid";
   },
   updates: CodexCageConfigUpdates,
+  agents: AgentProviderByRole,
   dryRun: boolean,
 ): Promise<SetupResult> {
   const actions = updates.actions;
@@ -386,6 +495,7 @@ async function applySetup(
       throw new Error("Actions requires a pinned Codex Cage version.");
     const workflow = generateGitHubActionsWorkflow({
       codexCageVersion: version,
+      agents,
       runsOn: actions.runner,
       timeoutMinutes: actions.timeout_minutes,
       labels: {
@@ -416,6 +526,7 @@ async function configureGithubRepository(
   cwd: string,
   actions: CodexCageConfig["actions"],
   prompts: SetupPrompts | null,
+  agents: AgentProviderByRole,
 ): Promise<string[]> {
   const notices: string[] = [];
   const auth = await execa("gh", ["auth", "status"], { cwd, reject: false });
@@ -453,8 +564,12 @@ async function configureGithubRepository(
   });
   const configured =
     secretList.exitCode === 0 ? parseGithubNames(secretList.stdout) : new Set();
-  for (const name of ["OPENAI_API_KEY", "CODEX_CAGE_GITHUB_TOKEN"] as const) {
-    if (configured.has(name)) continue;
+  // Each group is satisfied by any one of its names; prompt for the first.
+  for (const group of requiredActionsSecretGroups(agents)) {
+    const name = group[0];
+    if (name === undefined || group.some((candidate) => configured.has(candidate))) {
+      continue;
+    }
     if (prompts === null || !(await prompts.confirm(`Configure ${name} now?`, false))) {
       notices.push(
         `Missing Actions secret ${name}; configure it with \`gh secret set ${name}\`.`,

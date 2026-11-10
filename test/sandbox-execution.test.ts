@@ -3,8 +3,8 @@ import { mkdtemp, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { codexExecCommand } from "../src/agent/codex.js";
 import {
-  codexExecCommand,
   createHostShellRunner,
   createHostWorkspace,
   createLineStreamSink,

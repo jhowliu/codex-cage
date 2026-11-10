@@ -6,11 +6,15 @@ on:
       image_version:
         description: Image version tag to publish.
         required: true
-        default: "0.1.1"
+        default: "0.1.2"
       codex_cli_version:
         description: Exact @openai/codex version to install.
         required: true
         default: "0.125.0"
+      claude_code_version:
+        description: Exact @anthropic-ai/claude-code version to install.
+        required: true
+        default: "2.1.319"
   push:
     tags:
       - base-v*
@@ -22,6 +26,7 @@ permissions:
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}/base
   DEFAULT_CODEX_CLI_VERSION: "0.125.0"
+  DEFAULT_CLAUDE_CODE_VERSION: "2.1.319"
 
 jobs:
   publish:
@@ -36,9 +41,11 @@ jobs:
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             echo "IMAGE_VERSION=${GITHUB_REF_NAME#base-v}" >> "$GITHUB_ENV"
             echo "CODEX_CLI_VERSION=${DEFAULT_CODEX_CLI_VERSION}" >> "$GITHUB_ENV"
+            echo "CLAUDE_CODE_VERSION=${DEFAULT_CLAUDE_CODE_VERSION}" >> "$GITHUB_ENV"
           else
             echo "IMAGE_VERSION=${{ inputs.image_version }}" >> "$GITHUB_ENV"
             echo "CODEX_CLI_VERSION=${{ inputs.codex_cli_version }}" >> "$GITHUB_ENV"
+            echo "CLAUDE_CODE_VERSION=${{ inputs.claude_code_version }}" >> "$GITHUB_ENV"
           fi
 
       - name: Set up QEMU
@@ -63,6 +70,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           build-args: |
             CODEX_CLI_VERSION=${{ env.CODEX_CLI_VERSION }}
+            CLAUDE_CODE_VERSION=${{ env.CLAUDE_CODE_VERSION }}
           tags: |
             ${{ env.IMAGE_NAME }}:${{ env.IMAGE_VERSION }}
             ${{ env.IMAGE_NAME }}:latest

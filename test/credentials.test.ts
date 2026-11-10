@@ -3,9 +3,13 @@ import test from "node:test";
 import {
   credentialsForCommand,
   githubTokenFromEnv,
+  globalCredentialsPath,
+  mergeCredentialEnv,
   normalizeCredentialEnv,
   prepareRunCredentials,
 } from "../src/credentials.js";
+
+const codexAgents = { implement: "codex", review: "codex" } as const;
 
 test("normalizeCredentialEnv drops empty placeholders and mirrors GITHUB_TOKEN to GH_TOKEN", () => {
   assert.deepEqual(
@@ -31,8 +35,12 @@ test("setup and verify receive non-credential env only", () => {
     APP_ENV: "test",
   });
 
-  assert.deepEqual(credentialsForCommand("setup", { env }).env, { APP_ENV: "test" });
-  assert.deepEqual(credentialsForCommand("verify", { env }).env, { APP_ENV: "test" });
+  assert.deepEqual(credentialsForCommand("setup", { env, agents: codexAgents }).env, {
+    APP_ENV: "test",
+  });
+  assert.deepEqual(credentialsForCommand("verify", { env, agents: codexAgents }).env, {
+    APP_ENV: "test",
+  });
 });
 
 test("clone receives only GitHub auth", () => {
@@ -42,7 +50,7 @@ test("clone receives only GitHub auth", () => {
     APP_ENV: "test",
   });
 
-  assert.deepEqual(credentialsForCommand("clone", { env }).env, {
+  assert.deepEqual(credentialsForCommand("clone", { env, agents: codexAgents }).env, {
     GITHUB_TOKEN: "github-secret",
     GH_TOKEN: "github-secret",
   });
@@ -55,10 +63,10 @@ test("implementation and review receive only Codex auth", () => {
     APP_ENV: "test",
   });
 
-  assert.deepEqual(credentialsForCommand("implement", { env }).env, {
+  assert.deepEqual(credentialsForCommand("implement", { env, agents: codexAgents }).env, {
     OPENAI_API_KEY: "openai-secret",
   });
-  assert.deepEqual(credentialsForCommand("review", { env }).env, {
+  assert.deepEqual(credentialsForCommand("review", { env, agents: codexAgents }).env, {
     OPENAI_API_KEY: "openai-secret",
   });
 });
@@ -67,6 +75,7 @@ test("implementation and review use OAuth fallback only when OPENAI_API_KEY is a
   assert.deepEqual(
     credentialsForCommand("implement", {
       env: { OPENAI_API_KEY: "openai-secret" },
+      agents: codexAgents,
       codexAuthFilePath: "/host/.codex/auth.json",
     }),
     { env: { OPENAI_API_KEY: "openai-secret" } },
@@ -74,6 +83,7 @@ test("implementation and review use OAuth fallback only when OPENAI_API_KEY is a
   assert.deepEqual(
     credentialsForCommand("review", {
       env: {},
+      agents: codexAgents,
       codexAuthFilePath: "/host/.codex/auth.json",
     }),
     { env: {}, codexAuthFilePath: "/host/.codex/auth.json" },
@@ -87,7 +97,7 @@ test("publish receives only GitHub auth", () => {
     APP_ENV: "test",
   });
 
-  assert.deepEqual(credentialsForCommand("publish", { env }).env, {
+  assert.deepEqual(credentialsForCommand("publish", { env, agents: codexAgents }).env, {
     GITHUB_TOKEN: "github-secret",
     GH_TOKEN: "github-secret",
   });
@@ -98,6 +108,7 @@ test("prepareRunCredentials centralizes run-level credential policy", async () =
   let codexAuthLookups = 0;
   const credentials = await prepareRunCredentials({
     cwd: "/repo",
+    agents: codexAgents,
     readEnv: async (cwd) => {
       assert.equal(cwd, "/repo");
       return {
@@ -144,6 +155,7 @@ test("prepareRunCredentials centralizes run-level credential policy", async () =
 test("prepareRunCredentials skips OAuth lookup when OpenAI API key is present", async () => {
   const credentials = await prepareRunCredentials({
     cwd: "/repo",
+    agents: codexAgents,
     readEnv: async () => ({
       OPENAI_API_KEY: "openai-secret",
     }),
@@ -155,4 +167,82 @@ test("prepareRunCredentials skips OAuth lookup when OpenAI API key is present", 
   assert.deepEqual(credentials.command("implement"), {
     env: { OPENAI_API_KEY: "openai-secret" },
   });
+});
+
+test("each agent role receives only its own provider's credentials", () => {
+  const env = normalizeCredentialEnv({
+    OPENAI_API_KEY: "openai-secret",
+    CLAUDE_CODE_OAUTH_TOKEN: "claude-token",
+    ANTHROPIC_API_KEY: "anthropic-key",
+    GITHUB_TOKEN: "github-secret",
+    APP_ENV: "test",
+  });
+  const agents = { implement: "claude", review: "codex" } as const;
+
+  assert.deepEqual(
+    credentialsForCommand("implement", {
+      env,
+      agents,
+      codexAuthFilePath: "/host/.codex/auth.json",
+    }),
+    {
+      env: {
+        CLAUDE_CODE_OAUTH_TOKEN: "claude-token",
+        ANTHROPIC_API_KEY: "anthropic-key",
+      },
+    },
+  );
+  assert.deepEqual(credentialsForCommand("review", { env, agents }), {
+    env: { OPENAI_API_KEY: "openai-secret" },
+  });
+  assert.deepEqual(credentialsForCommand("verify", { env, agents }).env, {
+    APP_ENV: "test",
+  });
+});
+
+test("prepareRunCredentials skips the Codex OAuth lookup when no role uses Codex", async () => {
+  const credentials = await prepareRunCredentials({
+    cwd: "/repo",
+    agents: { implement: "claude", review: "claude" },
+    readEnv: async () => ({ CLAUDE_CODE_OAUTH_TOKEN: "claude-token" }),
+    findCodexAuthFile: async () => {
+      throw new Error("OAuth lookup should not be used.");
+    },
+  });
+
+  assert.deepEqual(credentials.command("review"), {
+    env: { CLAUDE_CODE_OAUTH_TOKEN: "claude-token" },
+  });
+});
+
+test("mergeCredentialEnv layers repo values over the global agent credentials", () => {
+  const merged = mergeCredentialEnv({
+    global: {
+      CLAUDE_CODE_OAUTH_TOKEN: "global-claude",
+      OPENAI_API_KEY: "global-openai",
+      GITHUB_TOKEN: "global-github",
+    },
+    repo: {
+      OPENAI_API_KEY: "repo-openai",
+      CLAUDE_CODE_OAUTH_TOKEN: "",
+      GITHUB_TOKEN: "repo-github",
+    },
+  });
+
+  assert.deepEqual(merged.env, {
+    CLAUDE_CODE_OAUTH_TOKEN: "global-claude",
+    OPENAI_API_KEY: "repo-openai",
+    GITHUB_TOKEN: "repo-github",
+  });
+  assert.deepEqual(merged.sources, {
+    CLAUDE_CODE_OAUTH_TOKEN: "global",
+    OPENAI_API_KEY: "repo",
+    GITHUB_TOKEN: "repo",
+  });
+  assert.deepEqual(merged.ignoredGlobalNames, ["GITHUB_TOKEN"]);
+});
+
+test("globalCredentialsPath follows XDG_CONFIG_HOME", () => {
+  assert.equal(globalCredentialsPath({ XDG_CONFIG_HOME: "/xdg" }), "/xdg/codex-cage/env");
+  assert.match(globalCredentialsPath({}), /\/\.config\/codex-cage\/env$/);
 });

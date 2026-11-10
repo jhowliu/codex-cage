@@ -1,4 +1,9 @@
 import { stringify } from "yaml";
+import {
+  agentProvidersInUse,
+  type AgentProvider,
+  type AgentRole,
+} from "./agent/providers.js";
 
 export type GitHubActionsLabels = {
   run: string;
@@ -22,6 +27,8 @@ export type GitHubActionsWorkflowInput = {
   timeoutMinutes?: number;
   container?: GitHubActionsRuntime;
   services?: Readonly<Record<string, GitHubActionsRuntime>>;
+  /** Agent provider per role; defaults to Codex for both. */
+  agents?: Readonly<Record<AgentRole, AgentProvider>>;
 };
 
 const defaultLabels = {
@@ -32,6 +39,7 @@ const defaultLabels = {
 } satisfies GitHubActionsLabels;
 
 const codexCliVersion = "0.125.0";
+const claudeCodeVersion = "2.1.319";
 const versionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const labelPattern = /^[0-9A-Za-z][0-9A-Za-z .:/_-]*$/;
 
@@ -45,6 +53,10 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
   const runUrl = expression(
     "format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id)",
   );
+  const providers = [
+    ...agentProvidersInUse(input.agents ?? { implement: "codex", review: "codex" }),
+  ];
+  const agentSecrets = agentSecretNames(providers);
   const managementEnv = {
     GH_TOKEN: expression("secrets.CODEX_CAGE_GITHUB_TOKEN"),
     ISSUE_NUMBER: issueNumber,
@@ -70,12 +82,9 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
     steps: [
       {
         name: "Validate credentials",
-        env: {
-          OPENAI_API_KEY: expression("secrets.OPENAI_API_KEY"),
-          CODEX_CAGE_GITHUB_TOKEN: expression("secrets.CODEX_CAGE_GITHUB_TOKEN"),
-        },
+        env: credentialStepEnv(agentSecrets),
         run: [
-          'test -n "$OPENAI_API_KEY" || { printf "Missing OPENAI_API_KEY\\n" >&2; exit 1; }',
+          ...providers.map(agentCredentialCheck),
           'test -n "$CODEX_CAGE_GITHUB_TOKEN" || { printf "Missing CODEX_CAGE_GITHUB_TOKEN\\n" >&2; exit 1; }',
         ].join("\n"),
       },
@@ -94,18 +103,19 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
         with: { "node-version": "22" },
       },
       {
-        name: "Install Codex Cage and Codex CLI",
-        run: `npm install --global --no-audit --no-fund "codex-cage@${input.codexCageVersion}" "@openai/codex@${codexCliVersion}"`,
+        name: "Install Codex Cage and agent CLIs",
+        run: [
+          "npm install --global --no-audit --no-fund",
+          `"codex-cage@${input.codexCageVersion}"`,
+          ...providers.map((provider) => `"${agentCliPackage(provider)}"`),
+        ].join(" "),
       },
       {
         name: "Write Codex Cage credentials",
-        env: {
-          OPENAI_API_KEY: expression("secrets.OPENAI_API_KEY"),
-          CODEX_CAGE_GITHUB_TOKEN: expression("secrets.CODEX_CAGE_GITHUB_TOKEN"),
-        },
+        env: credentialStepEnv(agentSecrets),
         run: [
           "umask 077",
-          'printf \'OPENAI_API_KEY=%s\\nGITHUB_TOKEN=%s\\n\' "$OPENAI_API_KEY" "$CODEX_CAGE_GITHUB_TOKEN" > .codex-cage.env',
+          writeCredentialsCommand(agentSecrets),
           "chmod 600 .codex-cage.env",
         ].join("\n"),
       },
@@ -198,6 +208,81 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
     },
     { lineWidth: 0 },
   );
+}
+
+/**
+ * Actions secrets a workflow needs. Each group is satisfied by any one of its
+ * names (Claude accepts an OAuth token or an API key).
+ */
+export function requiredActionsSecretGroups(
+  agents: Readonly<Record<AgentRole, AgentProvider>>,
+): string[][] {
+  return [
+    ...[...agentProvidersInUse(agents)].map((provider) => agentSecretNames([provider])),
+    ["CODEX_CAGE_GITHUB_TOKEN"],
+  ];
+}
+
+/** Actions secret names for the agent providers, named as each CLI reads them. */
+export function agentSecretNames(providers: readonly AgentProvider[]): string[] {
+  return providers.flatMap((provider) => {
+    switch (provider) {
+      case "codex":
+        return ["OPENAI_API_KEY"];
+      case "claude":
+        return ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"];
+      default: {
+        const exhaustiveProvider: never = provider;
+        return exhaustiveProvider;
+      }
+    }
+  });
+}
+
+function agentCredentialCheck(provider: AgentProvider): string {
+  switch (provider) {
+    case "codex":
+      return 'test -n "$OPENAI_API_KEY" || { printf "Missing OPENAI_API_KEY\\n" >&2; exit 1; }';
+    case "claude":
+      return '{ test -n "$CLAUDE_CODE_OAUTH_TOKEN" || test -n "$ANTHROPIC_API_KEY"; } || { printf "Missing CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY\\n" >&2; exit 1; }';
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
+function agentCliPackage(provider: AgentProvider): string {
+  switch (provider) {
+    case "codex":
+      return `@openai/codex@${codexCliVersion}`;
+    case "claude":
+      return `@anthropic-ai/claude-code@${claudeCodeVersion}`;
+    default: {
+      const exhaustiveProvider: never = provider;
+      return exhaustiveProvider;
+    }
+  }
+}
+
+function credentialStepEnv(agentSecrets: readonly string[]): Record<string, string> {
+  return {
+    ...Object.fromEntries(
+      agentSecrets.map((name) => [name, expression(`secrets.${name}`)]),
+    ),
+    CODEX_CAGE_GITHUB_TOKEN: expression("secrets.CODEX_CAGE_GITHUB_TOKEN"),
+  };
+}
+
+function writeCredentialsCommand(agentSecrets: readonly string[]): string {
+  const names = [...agentSecrets, "GITHUB_TOKEN"];
+  const format = names.map((name) => `${name}=%s\\n`).join("");
+  const values = [
+    ...agentSecrets.map((name) => `"$${name}"`),
+    '"$CODEX_CAGE_GITHUB_TOKEN"',
+  ];
+
+  return `printf '${format}' ${values.join(" ")} > .codex-cage.env`;
 }
 
 function expression(value: string): string {

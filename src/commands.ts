@@ -86,7 +86,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .argument("<issue-url>", "GitHub or Linear issue URL")
     .option("--repo <repo>", "target GitHub repository override")
     .option("--base <branch>", "base branch override")
-    .option("--model <model>", "Codex model override")
+    .option("--model <model>", "implementation agent model override")
     .option("--draft", "create a draft pull request")
     .option("--run-id <id>", "use a supplied Run identifier")
     .option(

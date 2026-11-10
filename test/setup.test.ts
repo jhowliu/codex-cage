@@ -6,6 +6,12 @@ import test from "node:test";
 import { parse } from "yaml";
 import { setupProject, type SetupPrompts } from "../src/setup.js";
 
+// Setup writes agent credentials to the machine-wide file; keep it in a temp
+// directory so tests never touch the real ~/.config.
+const configHome = await mkdtemp(join(tmpdir(), "codex-cage-config-"));
+process.env.XDG_CONFIG_HOME = configHome;
+const globalEnvPath = join(configHome, "codex-cage", "env");
+
 async function tempRepo(): Promise<string> {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-setup-"));
   await writeFile(
@@ -235,6 +241,110 @@ test("setup merges missing keys into an existing env example", async () => {
     assert.match(envExample, /OPENAI_API_KEY=/);
     assert.match(envExample, /GITHUB_TOKEN=/);
   } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("interactive setup implements with Claude and reviews with Codex by default", async () => {
+  const cwd = await tempRepo();
+  try {
+    await setupProject(cwd, {}, acceptingPrompts());
+    const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
+      agent: { implement: { provider: string }; review: { provider: string } };
+    };
+    const workflow = await readFile(
+      join(cwd, ".github", "workflows", "codex-cage.yml"),
+      "utf8",
+    );
+
+    assert.equal(config.agent.implement.provider, "claude");
+    assert.equal(config.agent.review.provider, "codex");
+    assert.match(workflow, /@anthropic-ai\/claude-code@/);
+    assert.match(workflow, /CLAUDE_CODE_OAUTH_TOKEN/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("non-interactive setup falls back to Codex without Claude credentials", async () => {
+  const cwd = await tempRepo();
+  try {
+    await rm(globalEnvPath, { force: true });
+    const result = await setupProject(cwd, { yes: true, actions: false });
+    const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
+      agent: { implement: { provider: string } };
+    };
+
+    assert.equal(config.agent.implement.provider, "codex");
+    assert.ok(result.notices.some((notice) => notice.includes("claude setup-token")));
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("non-interactive setup picks Claude when the global file has a Claude token", async () => {
+  const cwd = await tempRepo();
+  try {
+    await mkdir(join(configHome, "codex-cage"), { recursive: true });
+    await writeFile(globalEnvPath, "CLAUDE_CODE_OAUTH_TOKEN=claude-token\n", "utf8");
+    await setupProject(cwd, { yes: true, actions: false });
+    const config = parse(await readFile(join(cwd, ".codex-cage.yml"), "utf8")) as {
+      agent: { implement: { provider: string } };
+    };
+
+    assert.equal(config.agent.implement.provider, "claude");
+  } finally {
+    await rm(globalEnvPath, { force: true });
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup keeps the agents of an existing config", async () => {
+  const cwd = await tempRepo();
+  try {
+    await writeFile(
+      join(cwd, ".codex-cage.yml"),
+      "verify:\n  - npm test\nagent:\n  model: gpt-5.4\n",
+      "utf8",
+    );
+    await setupProject(cwd, { yes: true, actions: false });
+
+    assert.match(await readFile(join(cwd, ".codex-cage.yml"), "utf8"), /model: gpt-5\.4/);
+    assert.doesNotMatch(await readFile(join(cwd, ".codex-cage.yml"), "utf8"), /claude/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("setup saves agent credentials to the global file and GitHub to the repo", async () => {
+  const cwd = await tempRepo();
+  const prompts: SetupPrompts = {
+    async input(_message, defaultValue) {
+      return defaultValue;
+    },
+    async secret(message) {
+      return message === "GITHUB_TOKEN" ? "github-secret" : `${message}-value`;
+    },
+    async confirm(message, defaultValue) {
+      if (message.startsWith("Configure local")) return true;
+      if (message.startsWith("Enable GitHub Actions")) return false;
+      return defaultValue;
+    },
+    close() {},
+  };
+  try {
+    await rm(globalEnvPath, { force: true });
+    await setupProject(cwd, {}, prompts);
+    const globalEnv = await readFile(globalEnvPath, "utf8");
+    const repoEnv = await readFile(join(cwd, ".codex-cage.env"), "utf8");
+
+    assert.match(globalEnv, /CLAUDE_CODE_OAUTH_TOKEN=CLAUDE_CODE_OAUTH_TOKEN-value/);
+    assert.doesNotMatch(globalEnv, /GITHUB_TOKEN/);
+    assert.equal((await stat(globalEnvPath)).mode & 0o777, 0o600);
+    assert.match(repoEnv, /GITHUB_TOKEN=github-secret/);
+    assert.doesNotMatch(repoEnv, /CLAUDE_CODE_OAUTH_TOKEN/);
+  } finally {
+    await rm(globalEnvPath, { force: true });
     await rm(cwd, { recursive: true, force: true });
   }
 });

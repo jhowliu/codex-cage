@@ -194,7 +194,7 @@ test("runIndependentReview runs a fresh review runner and returns parsed action"
   const diff = "diff --git a/src/app.ts b/src/app.ts";
   const result = await runIndependentReview({
     cwd: "/repo",
-    model: "gpt-5.4",
+    agent: { provider: "codex", model: "gpt-5.4" },
     cycle: 0,
     maxReviewCycles: 2,
     issueContext: "Issue context",
@@ -208,7 +208,7 @@ test("runIndependentReview runs a fresh review runner and returns parsed action"
 
   assert.equal(runner.calls.length, 1);
   assert.equal(runner.calls[0]?.cwd, "/repo");
-  assert.equal(runner.calls[0]?.model, "gpt-5.4");
+  assert.deepEqual(runner.calls[0]?.agent, { provider: "codex", model: "gpt-5.4" });
   assert.equal(runner.calls[0]?.outputSchema.type, "object");
   assert.deepEqual(runner.calls[0]?.outputSchema.required, [
     "decision",
@@ -227,7 +227,7 @@ test("runIndependentReview fails if the read-only review changes the diff", asyn
     () =>
       runIndependentReview({
         cwd: "/repo",
-        model: "gpt-5.4",
+        agent: { provider: "codex", model: "gpt-5.4" },
         cycle: 0,
         maxReviewCycles: 2,
         issueContext: "Issue context",

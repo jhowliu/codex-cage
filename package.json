@@ -17,7 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.web.json",
     "test": "npm run build && node --test \"dist/test/**/*.test.js\"",
     "qa": "npm run build && node --test \"dist/test/qa.test.js\"",
-    "qa:image": "docker build --build-arg CODEX_CLI_VERSION=0.125.0 -t codex-cage/base:local docker/base && docker run --rm codex-cage/base:local sh -lc 'test \"$(id -un)\" = agent && node --version && npm --version && git --version && gh --version && codex --version && curl --version >/dev/null && jq --version && ssh -V'",
+    "qa:image": "docker build --build-arg CODEX_CLI_VERSION=0.125.0 --build-arg CLAUDE_CODE_VERSION=2.1.319 -t codex-cage/base:local docker/base && docker run --rm codex-cage/base:local sh -lc 'test \"$(id -un)\" = agent && node --version && npm --version && git --version && gh --version && codex --version && claude --version && curl --version >/dev/null && jq --version && ssh -V'",
     "lint": "npm run typecheck",
     "format": "prettier --check ."
   },

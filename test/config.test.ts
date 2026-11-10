@@ -138,3 +138,65 @@ test("config schema requires a pinned version when Actions is enabled", () => {
     /must be set when GitHub Actions is enabled/,
   );
 });
+
+test("agents default to Codex for both roles", () => {
+  const config = codexCageConfigSchema.parse({ verify: ["npm test"] });
+
+  assert.deepEqual(config.agent, {
+    implement: { provider: "codex", model: "gpt-5.4-mini" },
+    review: { provider: "codex", model: "gpt-5.4-mini" },
+    max_iterations: 5,
+    max_review_cycles: 2,
+  });
+});
+
+test("legacy agent.model applies to every Codex role", () => {
+  const config = codexCageConfigSchema.parse({
+    verify: ["npm test"],
+    agent: { model: "gpt-5.4", max_iterations: 3 },
+  });
+
+  assert.deepEqual(config.agent.implement, { provider: "codex", model: "gpt-5.4" });
+  assert.deepEqual(config.agent.review, { provider: "codex", model: "gpt-5.4" });
+  assert.equal(config.agent.max_iterations, 3);
+});
+
+test("agent roles pick a provider default model unless one is configured", () => {
+  const config = codexCageConfigSchema.parse({
+    verify: ["npm test"],
+    agent: {
+      model: "gpt-5.4",
+      implement: { provider: "claude" },
+      review: { provider: "codex" },
+    },
+  });
+
+  assert.deepEqual(config.agent.implement, {
+    provider: "claude",
+    model: "claude-opus-5-5",
+  });
+  assert.deepEqual(config.agent.review, { provider: "codex", model: "gpt-5.4" });
+});
+
+test("resolved agent config round-trips through the schema", () => {
+  const resolved = codexCageConfigSchema.parse({
+    verify: ["npm test"],
+    agent: { implement: { provider: "claude", model: "claude-sonnet-5-5" } },
+  });
+
+  assert.deepEqual(
+    codexCageConfigSchema.parse({ verify: ["npm test"], agent: resolved.agent }).agent,
+    resolved.agent,
+  );
+});
+
+test("config schema rejects unknown agent providers", () => {
+  assert.throws(
+    () =>
+      codexCageConfigSchema.parse({
+        verify: ["npm test"],
+        agent: { implement: { provider: "gemini" } },
+      }),
+    /provider/,
+  );
+});

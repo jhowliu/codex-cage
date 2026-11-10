@@ -127,7 +127,7 @@ export async function runReviewGate(input: {
     const reviewCredentials = input.context.credentials.command("review");
     const result = await input.review({
       cwd: input.context.cwd,
-      model: input.context.model,
+      agent: input.context.agents.review,
       cycle: input.reviewCycle,
       maxReviewCycles: input.context.config.agent.max_review_cycles,
       issueContext: reviewIssueContext,
@@ -139,7 +139,7 @@ export async function runReviewGate(input: {
       runner: createReviewAgentRunner(
         input.shell,
         reviewCredentials,
-        input.context.executionMode === "direct",
+        input.context.executionMode,
       ),
       ...(reviewCredentials.env === undefined ? {} : { env: reviewCredentials.env }),
     });

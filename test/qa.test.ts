@@ -134,7 +134,7 @@ async function runFakeQaScenario(input: FakeRunInput): Promise<QaResult> {
 
   const review = await runIndependentReview({
     cwd: "/repo",
-    model: "gpt-5.4",
+    agent: { provider: "codex", model: "gpt-5.4" },
     cycle: 0,
     maxReviewCycles: 0,
     issueContext: issue.body,

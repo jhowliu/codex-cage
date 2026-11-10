@@ -15,7 +15,7 @@ Requirements:
 - Node.js `>=22`
 - Docker
 - Git
-- A Codex auth method, either `OPENAI_API_KEY` or host Codex OAuth
+- Auth for the configured agents: Claude Code (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`) and Codex (`OPENAI_API_KEY` or host Codex OAuth)
 - `GITHUB_TOKEN` for GitHub issue lookup, clone, push, and PR creation
 
 From this repository:
@@ -59,14 +59,28 @@ setup:
 
 verify:
   - npm test
+
+agent:
+  implement:
+    provider: claude # or codex
+  review:
+    provider: codex # or claude
 ```
 
-The wizard can write local credentials to `.codex-cage.env` with restricted permissions. You can also create it manually:
+New configs implement with Claude Code and review with Codex. Configs without `agent.implement`/`agent.review` keep using Codex for both.
+
+The wizard writes credentials with restricted permissions: agent credentials go to `~/.config/codex-cage/env` once per machine, and GitHub credentials go to the repo's `.codex-cage.env`. You can also create them manually:
 
 ```dotenv
+# ~/.config/codex-cage/env
+CLAUDE_CODE_OAUTH_TOKEN=...
 OPENAI_API_KEY=...
-GITHUB_TOKEN=...
 LINEAR_API_KEY=...
+```
+
+```dotenv
+# .codex-cage.env in the target repo
+GITHUB_TOKEN=...
 ```
 
 Run a GitHub issue:
@@ -296,7 +310,7 @@ Codex Cage prepares disposable Docker resources per run:
 
 - A labeled Docker volume for `/workspace`
 - A labeled Docker network for run-local connectivity
-- An agent container using the pinned default image `ghcr.io/jhowliu/codex-cage/base:0.1.1`
+- An agent container using the pinned default image `ghcr.io/jhowliu/codex-cage/base:0.1.2`
 
 The sandbox runs as the non-root `agent` user, clones the target repo into the volume, and does not bind mount the host working tree, Docker socket, SSH config, GitHub CLI config, or host ports.
 
