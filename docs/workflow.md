@@ -255,14 +255,14 @@ codex-cage check <issue-url> --json
 
 When `codex-cage run` starts inside a [herdr](https://herdr.dev) pane (`HERDR_ENV=1` and `HERDR_PANE_ID` set), it reports its progress to that pane. Outside herdr, nothing changes.
 
-| Run event     | What herdr shows                                                                                                                                       |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Run started   | Agent `codex-cage` is `working`; the pane title is the issue, such as `#1 Add multiply()`.                                                             |
-| Stage started | The working label is the stage: `prepare`, `implement 2/3`, `verify`, `review`, `publish`, or `implement (attempt 2)` after review sends the run back. |
-| PR opened     | The state is `done`, labeled `PR opened`. A notification shows the PR URL.                                                                             |
-| Run failed    | The state is `blocked`, labeled `failed: <failure code>`. A notification asks for attention.                                                           |
+| Run event     | What herdr shows                                                                                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Run started   | Agent `codex-cage` is `working`. The pane title is the issue, such as `#1 Add multiply()`.                                                                                        |
+| Stage started | The line under the agent name in the agent list shows the stage: `prepare`, `implement 2/3`, `verify`, `review`, `publish`, or `implement try 2` after review sends the run back. |
+| PR opened     | The state is `done`, and the agent list shows `PR opened`. A notification shows the PR URL.                                                                                       |
+| Run failed    | The state is `blocked`, and the agent list shows the failure code, such as `verify_failed`. A notification asks for attention.                                                    |
 
-herdr keeps this state only while `run` is running in the pane's foreground. Once the command exits, the pane returns to a plain shell.
+herdr keeps this state only while `run` is running in the pane's foreground. Once the command exits, the pane returns to a plain shell. The same text is also stored as herdr state labels (`herdr pane get <pane-id>` shows `state_labels`) for tools that read pane state.
 
 Another agent can wait for a run it started in a pane:
 

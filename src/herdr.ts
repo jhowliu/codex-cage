@@ -2,8 +2,9 @@ import { execa } from "execa";
 import type { RunEvent, RunEventSink } from "./run/events.js";
 
 /**
- * Reports a run's progress to the herdr pane it runs in: the pane title, a
- * stage label, a final agent state, and a notification.
+ * Reports a run's progress to the herdr pane it runs in: the pane title, the
+ * current stage under the agent name, a final agent state, and a
+ * notification.
  *
  * herdr keeps a reported agent state only while a program runs in the
  * pane's foreground, which `codex-cage run` does until it exits. The final
@@ -29,7 +30,14 @@ type LabelledState = ReportedState | "done";
 
 export type HerdrUpdate =
   | { kind: "agent"; state: ReportedState; message: string }
-  | { kind: "metadata"; title: string; labels: Partial<Record<LabelledState, string>> }
+  | {
+      kind: "metadata";
+      title: string;
+      /** Shown under the agent name in herdr's agent list. */
+      displayAgent: string;
+      /** Not shown in the herdr 0.9.5 sidebar; readable through `pane get`. */
+      labels: Partial<Record<LabelledState, string>>;
+    }
   | { kind: "notification"; title: string; body: string; sound: "done" | "request" };
 
 /** The herdr pane this process runs in, or null when it is not inside herdr. */
@@ -107,13 +115,13 @@ export class HerdrRunTracker {
         // Report the agent first: herdr attaches metadata to a reported agent.
         return [
           { kind: "agent", state: "working", message: `run ${event.runId}` },
-          { kind: "metadata", title: this.#title, labels: {} },
+          { kind: "metadata", title: this.#title, displayAgent: "starting", labels: {} },
         ];
       case "stage.started":
         return [
           this.#working(
             event.stageAttempt > 1
-              ? `${event.stage} (attempt ${event.stageAttempt})`
+              ? `${event.stage} try ${event.stageAttempt}`
               : event.stage,
           ),
         ];
@@ -128,6 +136,7 @@ export class HerdrRunTracker {
           return this.#finished({
             state: "idle",
             label: "PR opened",
+            displayAgent: "PR opened",
             detail: event.payload.prUrl,
             sound: "done",
           });
@@ -136,6 +145,9 @@ export class HerdrRunTracker {
         return this.#finished({
           state: "blocked",
           label: `failed: ${event.payload.failureCode}`,
+          // The blocked icon already says "failed"; the sidebar fits about
+          // 17 characters, so show only the failure code there.
+          displayAgent: event.payload.failureCode,
           detail: `Inspect it with: codex-cage runs show ${event.runId}`,
           sound: "request",
         });
@@ -145,21 +157,28 @@ export class HerdrRunTracker {
   }
 
   #working(label: string): HerdrUpdate {
-    return { kind: "metadata", title: this.#title, labels: { working: label } };
+    return {
+      kind: "metadata",
+      title: this.#title,
+      displayAgent: label,
+      labels: { working: label },
+    };
   }
 
   #finished(outcome: {
     state: "idle" | "blocked";
     label: string;
+    displayAgent: string;
     detail: string;
     sound: "done" | "request";
   }): HerdrUpdate[] {
-    const { state, label, detail, sound } = outcome;
+    const { state, label, displayAgent, detail, sound } = outcome;
 
     return [
       {
         kind: "metadata",
         title: this.#title,
+        displayAgent,
         // An idle report shows as `done` until someone looks at the pane.
         labels: state === "idle" ? { idle: label, done: label } : { blocked: label },
       },
@@ -207,6 +226,8 @@ export function herdrCommandArgs(
         herdrAgentLabel,
         "--title",
         update.title,
+        "--display-agent",
+        update.displayAgent,
         // Each report replaces the pane's labels, so send the whole set.
         ...Object.entries(update.labels).flatMap(([state, label]) => [
           "--state-label",

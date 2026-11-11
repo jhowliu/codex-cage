@@ -63,7 +63,26 @@ function recorder() {
 }
 
 const reportAgent = ["pane", "report-agent", "wP:p3", "--source", "codex-cage"];
-const reportMetadata = ["pane", "report-metadata", "wP:p3", "--source", "codex-cage"];
+
+/** The expected `report-metadata` command for issue #1 in pane wP:p3. */
+function metadata(displayAgent: string, ...stateLabels: string[]): string[] {
+  return [
+    "pane",
+    "report-metadata",
+    "wP:p3",
+    "--source",
+    "codex-cage",
+    "--agent",
+    "codex-cage",
+    "--title",
+    "#1 Add multiply()",
+    "--display-agent",
+    displayAgent,
+    ...stateLabels.flatMap((label) => ["--state-label", label]),
+    "--seq",
+    "<seq>",
+  ];
+}
 
 test("herdrPaneFromEnv finds the pane only inside herdr", () => {
   assert.deepEqual(herdrPaneFromEnv({ HERDR_ENV: "1", HERDR_PANE_ID: "wP:p3" }), {
@@ -111,7 +130,6 @@ test("the herdr sink mirrors a successful run into its pane", async () => {
     await sink(runEvent);
   }
 
-  const title = ["--agent", "codex-cage", "--title", "#1 Add multiply()"];
   assert.deepEqual(commands, [
     [
       ...reportAgent,
@@ -124,35 +142,12 @@ test("the herdr sink mirrors a successful run into its pane", async () => {
       "--seq",
       "<seq>",
     ],
-    [...reportMetadata, ...title, "--seq", "<seq>"],
-    [...reportMetadata, ...title, "--state-label", "working=prepare", "--seq", "<seq>"],
-    [...reportMetadata, ...title, "--state-label", "working=implement", "--seq", "<seq>"],
-    [
-      ...reportMetadata,
-      ...title,
-      "--state-label",
-      "working=implement 2/3",
-      "--seq",
-      "<seq>",
-    ],
-    [
-      ...reportMetadata,
-      ...title,
-      "--state-label",
-      "working=implement (attempt 2)",
-      "--seq",
-      "<seq>",
-    ],
-    [
-      ...reportMetadata,
-      ...title,
-      "--state-label",
-      "idle=PR opened",
-      "--state-label",
-      "done=PR opened",
-      "--seq",
-      "<seq>",
-    ],
+    metadata("starting"),
+    metadata("prepare", "working=prepare"),
+    metadata("implement", "working=implement"),
+    metadata("implement 2/3", "working=implement 2/3"),
+    metadata("implement try 2", "working=implement try 2"),
+    metadata("PR opened", "idle=PR opened", "done=PR opened"),
     [
       ...reportAgent,
       "--agent",
@@ -190,17 +185,7 @@ test("the herdr sink marks a failed run blocked and asks for attention", async (
   );
 
   assert.deepEqual(commands, [
-    [
-      ...reportMetadata,
-      "--agent",
-      "codex-cage",
-      "--title",
-      "#1 Add multiply()",
-      "--state-label",
-      "blocked=failed: verify_failed",
-      "--seq",
-      "<seq>",
-    ],
+    metadata("verify_failed", "blocked=failed: verify_failed"),
     [
       ...reportAgent,
       "--agent",
