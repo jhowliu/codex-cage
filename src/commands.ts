@@ -5,6 +5,7 @@ import { checkIssue, type IssueCheckResult } from "./check.js";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { createControlRoomServer } from "./control-room.js";
 import { doctorProject, type DoctorResult } from "./doctor.js";
+import { createHerdrRunEventSink, herdrPaneFromEnv } from "./herdr.js";
 import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
 import { setupProject, type SetupResult } from "./setup.js";
@@ -145,6 +146,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         }
 
         const verbose = options.verbose === true || process.env[VERBOSE_ENV] === "1";
+        const herdrPane = herdrPaneFromEnv(process.env);
         let result: RunCodexCageResult;
         try {
           result = await run(
@@ -161,6 +163,14 @@ export function createCli(dependencies: CliDependencies = {}): Command {
               onProgress: (event) => {
                 console.error(formatRunProgressEvent(event, stderrColor));
               },
+              ...(herdrPane === null
+                ? {}
+                : {
+                    onEvent: createHerdrRunEventSink({
+                      pane: herdrPane,
+                      warn: (message) => console.error(stderrColor.warning(message)),
+                    }),
+                  }),
             },
           );
         } catch (error) {

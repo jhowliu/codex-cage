@@ -251,6 +251,33 @@ codex-cage check <issue-url> --json
 
 `check` exits non-zero when the issue is not ready, so a script or agent can gate `run` on it: `codex-cage check <issue-url> && codex-cage run <issue-url>`. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
 
+## Running Inside herdr
+
+When `codex-cage run` starts inside a [herdr](https://herdr.dev) pane (`HERDR_ENV=1` and `HERDR_PANE_ID` set), it reports its progress to that pane. Outside herdr, nothing changes.
+
+| Run event     | What herdr shows                                                                                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Run started   | Agent `codex-cage` is `working`. The pane title is the issue, such as `#1 Add multiply()`.                                                                                        |
+| Stage started | The line under the agent name in the agent list shows the stage: `prepare`, `implement 2/3`, `verify`, `review`, `publish`, or `implement try 2` after review sends the run back. |
+| PR opened     | The state is `done`, and the agent list shows `PR opened`. A notification shows the PR URL.                                                                                       |
+| Run failed    | The state is `blocked`, and the agent list shows the failure code, such as `verify_failed`. A notification asks for attention.                                                    |
+
+herdr keeps this state only while `run` is running in the pane's foreground. Once the command exits, the pane returns to a plain shell. The same text is also stored as herdr state labels (`herdr pane get <pane-id>` shows `state_labels`) for tools that read pane state.
+
+Another agent can wait for a run it started in a pane:
+
+```bash
+herdr agent wait <pane-id> --timeout 3600000
+```
+
+The result tells it how the run ended:
+
+- `done`: the run opened a PR.
+- `blocked`: the run failed. Read the pane or `codex-cage runs show <run-id>`.
+- error `agent_not_running`: the run exited before it finished, for example because it crashed.
+
+Status updates are best effort. If a `herdr` command fails, `run` prints one warning, stops sending updates, and continues.
+
 ## Docker Compose Services
 
 Compose services are started by the host-side Codex Cage orchestrator, not by the implementation agent. Codex Cage runs `docker compose up -d` with a per-run project name, attaches the agent container to the Compose network, runs each `services.ready` command from a short-lived container on that same network, and tears services down with `docker compose down -v`.
