@@ -236,6 +236,21 @@ Doctor validates the shared config, Git repository, Docker daemon, local credent
 
 `--probe` also makes one minimal call per configured agent, the way a run does: in `runtime.image`, with only that provider's credentials, read-only, with structured output. It takes a few seconds and a few tokens. It catches problems that a credential check that only looks at files misses: an expired or invalid token, a model the account cannot use, and an agent CLI in the image that is too old for the model. Roles that share a provider and model are probed once. Direct mode skips the probe, because agents run on the CI runner. Interactive `codex-cage setup` runs the probe at the end; `setup --yes` does not.
 
+## Issue Readiness
+
+```bash
+codex-cage check <issue-url>
+codex-cage check <issue-url> --json
+```
+
+`check` runs the same readiness check that `codex-cage run` performs in its `preflight` phase, without starting a run. It reads the issue body and:
+
+- **fails** when an issue listed under a `## Blocked by` heading is still open, or cannot be looked up. References can be `#N` (same repository as the issue), `owner/repo#N`, or a full issue or pull request URL. A section that lists no references, such as `None - can start immediately`, passes.
+- **warns** when the `## What to build` or `## Acceptance criteria` section is missing or empty. Warnings never stop a run.
+- **fails** when `.codex-cage.yml` is missing or invalid.
+
+`check` exits non-zero when the issue is not ready. A `run` on a blocked issue stops with `issue_blocked` before any Docker resources are created. Its `summary.md` lists the open blockers, so the generated Actions workflow posts them in its failure comment. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
+
 ## Docker Compose Services
 
 Compose services are started by the host-side Codex Cage orchestrator, not by the implementation agent. Codex Cage runs `docker compose up -d` with a per-run project name, attaches the agent container to the Compose network, runs each `services.ready` command from a short-lived container on that same network, and tears services down with `docker compose down -v`.
@@ -320,6 +335,7 @@ For automation, `codex-cage run` emits a deterministic outcome so a workflow can
 | Code                                | Meaning                                                                                                                         |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `missing_config`, `invalid_config`  | `.codex-cage.yml` is missing or does not match the schema.                                                                      |
+| `issue_blocked`                     | An issue under the issue's `## Blocked by` heading is still open or could not be checked. Nothing was provisioned.              |
 | `runtime_image_failed`              | Building `runtime.dockerfile` failed.                                                                                           |
 | `docker_unavailable`                | The docker CLI is not on `PATH`, or the Docker daemon does not answer.                                                          |
 | `clone_failed`                      | Cloning the repository or checking out the base branch failed: no access, an empty repository, or an unknown base branch.       |

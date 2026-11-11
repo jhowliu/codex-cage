@@ -1650,3 +1650,57 @@ test("runCodexCage reports an unsupported review model as agent_model_unavailabl
     lastPhase: "review",
   });
 });
+
+test("runCodexCage stops with issue_blocked before provisioning when a blocker is open", async () => {
+  const cwd = await createProject("verify:\n  - npm test\n");
+  const events: string[] = [];
+  const lookups: number[] = [];
+  const blockedIssue: IssueContext = {
+    ...issue,
+    body: "## What to build\nWire it.\n\n## Acceptance criteria\n- works\n\n## Blocked by\n- #105\n- #106\n",
+  };
+
+  try {
+    const result = await runCodexCage(
+      { cwd, issueUrl: issue.url },
+      {
+        executionMode: "docker",
+        generateRunId: () => "run-blocked",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchIssueContext: async () => blockedIssue,
+        lookupIssueState: async (reference) => {
+          lookups.push(reference.number);
+          return reference.number === 105 ? "closed" : "open";
+        },
+        resolveTargetRepo: async () => repoResolution,
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+        }),
+        createDockerSandbox: () => fakeSandbox(events),
+        createShellRunner: () => shellRunner(new Map()),
+      },
+    );
+
+    assert.equal(result.failureCode, "issue_blocked");
+    assert.deepEqual(
+      lookups.sort((a, b) => a - b),
+      [105, 106],
+    );
+    assert.deepEqual(events, [], "no sandbox is created for a blocked issue");
+
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails("run-blocked");
+    store.close();
+    assert.equal(details.run.failureCode, "issue_blocked");
+    assert.equal(details.phases.at(-1)?.name, "preflight");
+
+    const summary = await readFile(details.artifacts["summary"] ?? "", "utf8");
+    assert.match(summary, /Blocked by open issue jhowliu\/codex-cage#106\./);
+    assert.doesNotMatch(summary, /#105/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

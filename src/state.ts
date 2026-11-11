@@ -38,6 +38,7 @@ export type RunStatus = (typeof runStatuses)[number];
 export const failureCodes = [
   "missing_config",
   "invalid_config",
+  "issue_blocked",
   "setup_failed",
   "runtime_image_failed",
   "docker_unavailable",

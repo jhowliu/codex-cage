@@ -19,6 +19,8 @@ import {
 } from "./docker.js";
 import { ghTokenLookup, type GithubTokenLookup } from "./github-auth.js";
 import { fetchIssueContext } from "./issue.js";
+import { fetchGithubIssueState } from "./issue-github.js";
+import { checkIssueReadiness, type IssueStateLookup } from "./issue-readiness.js";
 import { generateBranchName, type publishSuccessfulRun } from "./publish.js";
 import { buildPromptContext } from "./prompt-context.js";
 import { createAuthenticatedRepo, resolveTargetRepo } from "./repo.js";
@@ -50,6 +52,7 @@ export type RunCommandOptions = {
 
 export type RunCodexCageDependencies = {
   fetchIssueContext?: typeof fetchIssueContext;
+  lookupIssueState?: IssueStateLookup;
   resolveTargetRepo?: typeof resolveTargetRepo;
   createAuthenticatedRepo?: typeof createAuthenticatedRepo;
   readEnv?: (cwd: string) => Promise<Record<string, string>>;
@@ -155,6 +158,11 @@ async function prepareRuntimeContext(
     options.issueUrl,
     credentials.issueOptions(configResult.config.issue.comments),
   );
+  const lookupIssueState =
+    dependencies.lookupIssueState ??
+    ((reference) =>
+      fetchGithubIssueState(reference, { githubToken: credentials.githubToken() }));
+  const issueReadiness = await checkIssueReadiness(issue, lookupIssueState);
   const repoInput: Parameters<typeof resolveTargetRepo>[0] = {
     issue,
     cwd,
@@ -193,6 +201,7 @@ async function prepareRuntimeContext(
     configWarnings: configResult.warnings,
     credentials,
     issue,
+    issueReadiness,
     repoResolution,
     authenticatedRepo,
     baseBranch,
