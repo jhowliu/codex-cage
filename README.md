@@ -170,8 +170,6 @@ Common options:
 
 The `run` command reads `.codex-cage.yml` and `.codex-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
 
-Inside a [herdr](https://herdr.dev) pane, `run` also shows its progress in herdr: the pane title, the current stage, and a notification when it finishes. See [Running Inside herdr](docs/workflow.md#running-inside-herdr).
-
 ### Inspect Local Runs
 
 ```bash
