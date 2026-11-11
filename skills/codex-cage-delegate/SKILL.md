@@ -67,54 +67,25 @@ Done when every issue is started, waiting, or reported.
 
 ## 4. Start a run per ready issue
 
-Ready issues run in parallel, each in a **fresh pane** with its own result file. `<n>` is the issue number:
+Ready issues run in parallel, each as its own background command with its own result file. `<n>` is the issue number:
 
 ```bash
 mkdir -p .codex-cage/runs && rm -f .codex-cage/runs/delegate-<n>.json
+CODEX_CAGE_EXECUTION=docker codex-cage run <issue-url> --result-json .codex-cage/runs/delegate-<n>.json
 ```
 
-The start command:
-
-```bash
-CODEX_CAGE_EXECUTION=docker codex-cage run <issue-url> --result-json .codex-cage/runs/delegate-<n>.json; echo "cage-exit=$?"
-```
-
-- `CODEX_CAGE_EXECUTION=docker` keeps the run in the Docker sandbox even when the config selects direct mode.
-- The `cage-exit=` line marks the end of the run, including a crash.
-
-### Inside herdr (`HERDR_ENV=1`)
-
-Runs live in a background tab labelled `cage`, so the user's view stays where it is:
-
-1. Find it: `herdr tab list --workspace "$HERDR_WORKSPACE_ID"` lists a tab with `"label":"cage"`.
-2. If there is none, create it: `herdr tab create --workspace "$HERDR_WORKSPACE_ID" --label cage --cwd "$PWD" --no-focus`. Its `.result.root_pane.pane_id` takes the first run.
-3. Every other run splits a pane of the cage tab: `herdr pane list --workspace "$HERDR_WORKSPACE_ID"` shows each pane's `tab_id`. Then `herdr pane split <cage-pane> --direction right --cwd "$PWD" --no-focus`, alternating `right` and `down`. Use the new `.result.pane.pane_id`.
-4. Start the run: `herdr pane run <pane> '<start command>'`. The single quotes leave `$?` for the pane's shell.
-
-Splits stay inside the cage tab; the user's own panes keep their size. herdr's agent list shows each run's stage, so the user can follow along without switching tabs.
-
-### Outside herdr
-
-Run the start command as a background command, one per issue.
+`CODEX_CAGE_EXECUTION=docker` keeps the run in the Docker sandbox even when the config selects direct mode. Keep working with the user while the runs go.
 
 ## 5. Wait and report
 
-Inside herdr, wait on each pane:
+When a run's command exits, read `.codex-cage/runs/delegate-<n>.json`:
 
-```bash
-herdr pane wait-output <pane> --regex 'cage-exit=[0-9]+' --timeout 7200000
-```
+| Result              | Report                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `status: succeeded` | The `prUrl`. The user reviews and merges it.                                            |
+| `status: failed`    | The `failureCode` and `codex-cage runs show <runId>`.                                   |
+| No file             | The run crashed before writing its result. Report the last lines of the command output. |
 
-This blocks until the run ends, so run it in the background if your harness can, and keep working with the user meanwhile. It also matches output already in the pane, so it is safe to call late or again after a context reset. Outside herdr, wait for the background command to exit.
-
-Then read `.codex-cage/runs/delegate-<n>.json`:
-
-| Result              | Report                                                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `status: succeeded` | The `prUrl`. The user reviews and merges it. Close the run's pane.                                                         |
-| `status: failed`    | The `failureCode` and `codex-cage runs show <runId>`. Leave the pane open for the user.                                    |
-| No file             | The run crashed. Report the error from `herdr pane read <pane> --source recent-unwrapped --lines 80`. Leave the pane open. |
-
-Rerun a failed issue only after changing what made it fail, such as the issue body, the config, or a split into smaller issues, and always in a fresh pane.
+Rerun a failed issue only after changing what made it fail, such as the issue body, the config, or a split into smaller issues.
 
 Done when every started run has a reported result, and every waiting issue is listed with the blocker it waits on.

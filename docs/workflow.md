@@ -267,8 +267,8 @@ From the target repository's checkout, ask the agent to delegate a feature or a 
 1. Sizes the request and asks only about one-way-door decisions, such as public interfaces and data formats.
 2. Writes one issue per task with the `## What to build`, `## Acceptance criteria`, and `## Blocked by` sections.
 3. Runs `codex-cage check` on each issue. An issue with an open blocker waits until the blocker's PR merges.
-4. Starts `codex-cage run` for every ready issue in parallel, always in Docker mode. Inside herdr, each run gets its own pane in a background `cage` tab, so your current view stays put.
-5. Waits for each run and reports its PR URL, or its failure code and `codex-cage runs show <run-id>`. Panes of failed runs stay open for inspection.
+4. Starts `codex-cage run` for every ready issue in parallel as background commands, always in Docker mode.
+5. Reports each run's PR URL, or its failure code and `codex-cage runs show <run-id>`.
 
 Each run writes its result to `.codex-cage/runs/delegate-<issue-number>.json` with `run --result-json`. `.codex-cage/runs/` is already ignored by Git.
 
