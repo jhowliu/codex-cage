@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -322,6 +323,21 @@ test("runs show can emit color when forced", async () => {
     assert.equal(showResult.status, 0);
     assert.match(showResult.stdout, /\u001B\[/);
     assert.match(showResult.stdout, /Status/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runs list in a repository without runs creates no state and prints no warnings", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-empty-runs-"));
+
+  try {
+    const result = runCli(["runs", "list"], cwd);
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /No runs found\./);
+    assert.equal(result.stderr, "");
+    assert.equal(existsSync(join(cwd, ".codex-cage")), false);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

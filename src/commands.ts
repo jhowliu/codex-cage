@@ -7,7 +7,7 @@ import { doctorProject, type DoctorResult } from "./doctor.js";
 import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
 import { setupProject, type SetupResult } from "./setup.js";
-import { failureCodes, openRunStore } from "./state.js";
+import { failureCodes, openRunStoreReadOnly } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
 export const RESULT_FILE_ENV = "CODEX_CAGE_RESULT_FILE";
@@ -207,7 +207,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .command("list")
     .description("List known runs from local metadata.")
     .action(async () => {
-      const store = await openRunStore(process.cwd());
+      const store = await openRunStoreReadOnly(process.cwd());
       const color = createColorizer(process.stdout);
 
       try {
@@ -239,7 +239,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .description("Show metadata and artifact paths for a run.")
     .argument("<run-id>", "run id")
     .action(async (runId: string) => {
-      const store = await openRunStore(process.cwd());
+      const store = await openRunStoreReadOnly(process.cwd());
       const color = createColorizer(process.stdout);
 
       try {

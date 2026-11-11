@@ -22,7 +22,7 @@ npm run build
 npm exec -- codex-cage --help
 ```
 
-Node.js `>=22` is required.
+Node.js `>=22.13` is required (the run store uses the built-in `node:sqlite` module).
 
 ## Local Control Room
 

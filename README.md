@@ -12,7 +12,7 @@ https://github.com/user-attachments/assets/66e43421-9aa6-4024-8f82-6f0e9d385d6f
 
 Requirements:
 
-- Node.js `>=22`
+- Node.js `>=22.13` (for the built-in `node:sqlite` run store)
 - Docker
 - Git
 - Auth for the configured agents: Claude Code (`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token`, or `ANTHROPIC_API_KEY`) and Codex (`OPENAI_API_KEY` or host Codex OAuth)
@@ -176,7 +176,7 @@ codex-cage runs list
 codex-cage runs show <run-id>
 ```
 
-Run metadata is stored in `.codex-cage/codex-cage.sqlite`. Large artifacts such as logs, patches, issue payloads, prompt context, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
+Run metadata is stored in `.codex-cage/codex-cage.sqlite` (SQLite in WAL mode, so several runs in the same repository can write at once and `runs list` reads without blocking them). Large artifacts such as logs, patches, issue payloads, prompt context, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
 
 ## Design Architecture
 

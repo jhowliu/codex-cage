@@ -89,7 +89,12 @@ export const GENERATED_WORKFLOW_MARKER =
 const reviewPolicyPath = ".codex-cage/review-policy.md";
 const runtimeDockerfilePath = ".codex-cage/Dockerfile";
 const envExamplePath = ".codex-cage.env.example";
-const gitignoreEntries = [".codex-cage.env", ".codex-cage/runs/", ".codex-cage/*.sqlite"];
+const gitignoreEntries = [
+  ".codex-cage.env",
+  ".codex-cage/runs/",
+  ".codex-cage/*.sqlite",
+  ".codex-cage/*.sqlite-*",
+];
 
 const reviewPolicy = `# Codex Cage Review Policy
 
