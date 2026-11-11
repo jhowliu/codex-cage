@@ -22,7 +22,7 @@
     "format": "prettier --check ."
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
@@ -30,7 +30,6 @@
     "execa": "^9.5.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "sql.js": "^1.12.0",
     "yaml": "^2.7.0",
     "zod": "^4.6.7"
   },
@@ -39,7 +38,6 @@
     "@types/node": "^22.13.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@types/sql.js": "^1.4.9",
     "@vitejs/plugin-react": "^5.0.4",
     "prettier": "^3.5.1",
     "tailwindcss": "^4.3.3",

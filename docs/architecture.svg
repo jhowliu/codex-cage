@@ -47,7 +47,7 @@ text{font-family:"PingFang TC","Noto Sans TC","Microsoft JhengHei","Helvetica Ne
 <text x="274" y="286" class="bs">.codex-cage.yml · .env · zod</text>
 <rect x="722" y="240" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
 <text x="734" y="267" class="bt">RunStore</text>
-<text x="734" y="286" class="bs">SQLite (sql.js) · artifacts</text>
+<text x="734" y="286" class="bs">SQLite (node:sqlite) · artifacts</text>
 <rect x="262" y="388" width="190" height="64" rx="5" fill="#fff" stroke="#D3D7DE" stroke-width="1"/>
 <text x="274" y="415" class="bt">Host Workspace</text>
 <text x="274" y="434" class="bs">Direct mode · runner 臨時 VM</text>

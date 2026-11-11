@@ -1,10 +1,18 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import initSqlJs from "sql.js";
-import type { Database, ParamsObject, SqlJsStatic, SqlValue } from "sql.js";
+import type {
+  DatabaseSync,
+  SQLInputValue,
+  SQLOutputValue,
+  StatementResultingChanges,
+} from "node:sqlite";
 
-const require = createRequire(import.meta.url);
+type Row = Record<string, SQLOutputValue>;
+
+// How long a writer waits for another process's write lock before failing.
+// Run writes are a few small statements per phase, so contention is brief.
+const busyTimeoutMs = 5_000;
 
 export const stateDirectoryName = ".codex-cage";
 export const runsDirectoryName = "runs";
@@ -142,41 +150,93 @@ export type AddReviewCycleInput = {
   reportPath: string;
 };
 
-let sqlJsPromise: Promise<SqlJsStatic> | undefined;
-
+/**
+ * Opens the run store for writing. Every statement commits straight to the
+ * SQLite file, and concurrent processes serialize through SQLite's file lock,
+ * so parallel runs in one repository never overwrite each other's rows.
+ */
 export async function openRunStore(cwd: string): Promise<RunStore> {
-  const statePath = join(cwd, stateDirectoryName);
-  const runsPath = join(statePath, runsDirectoryName);
-  const databasePath = join(statePath, databaseFileName);
+  const paths = runStorePaths(cwd);
 
-  await mkdir(runsPath, { recursive: true });
+  await mkdir(paths.runsPath, { recursive: true });
 
-  const sqlJs = await loadSqlJs();
-  const database = await openDatabase(sqlJs, databasePath);
-  const store = new RunStore(database, databasePath, runsPath);
+  const sqlite = await loadSqlite();
+  const database = new sqlite.DatabaseSync(paths.databasePath, {
+    enableForeignKeyConstraints: true,
+    timeout: busyTimeoutMs,
+  });
 
-  store.migrate();
-  await store.save();
-
-  return store;
-}
-
-export class RunStore {
-  readonly databasePath: string;
-  readonly runsPath: string;
-
-  #database: Database;
-
-  constructor(database: Database, databasePath: string, runsPath: string) {
-    this.#database = database;
-    this.databasePath = databasePath;
-    this.runsPath = runsPath;
+  try {
+    // WAL lets readers (runs list, a polling panel) proceed while a run writes.
+    database.exec("PRAGMA journal_mode = WAL;");
+    migrate(database);
+  } catch (error) {
+    database.close();
+    throw error;
   }
 
-  migrate(): void {
-    this.#database.run(`
-      PRAGMA foreign_keys = ON;
+  return new RunStore(database, paths.databasePath, paths.runsPath);
+}
 
+/**
+ * Opens the run store for inspection only. It never creates, migrates, or
+ * rewrites the database, so it is safe to call while runs are in progress.
+ * A repository without a database yet reads as having no runs.
+ */
+export async function openRunStoreReadOnly(cwd: string): Promise<RunStore> {
+  const paths = runStorePaths(cwd);
+  const sqlite = await loadSqlite();
+
+  if (!existsSync(paths.databasePath)) {
+    const empty = new sqlite.DatabaseSync(":memory:");
+    migrate(empty);
+    return new RunStore(empty, paths.databasePath, paths.runsPath);
+  }
+
+  const database = new sqlite.DatabaseSync(paths.databasePath, {
+    readOnly: true,
+    timeout: busyTimeoutMs,
+  });
+
+  return new RunStore(database, paths.databasePath, paths.runsPath);
+}
+
+type RunStorePaths = {
+  databasePath: string;
+  runsPath: string;
+};
+
+function runStorePaths(cwd: string): RunStorePaths {
+  const statePath = join(cwd, stateDirectoryName);
+
+  return {
+    databasePath: join(statePath, databaseFileName),
+    runsPath: join(statePath, runsDirectoryName),
+  };
+}
+
+// Loaded lazily so the CLI can filter node:sqlite's experimental warning
+// before the module is first evaluated.
+async function loadSqlite(): Promise<typeof import("node:sqlite")> {
+  return await import("node:sqlite");
+}
+
+function migrate(database: DatabaseSync): void {
+  database.exec("BEGIN IMMEDIATE;");
+
+  try {
+    database.exec(schemaSql);
+    database.exec("COMMIT;");
+  } catch (error) {
+    if (database.isTransaction) {
+      database.exec("ROLLBACK;");
+    }
+
+    throw error;
+  }
+}
+
+const schemaSql = `
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
         applied_at TEXT NOT NULL
@@ -220,7 +280,18 @@ export class RunStore {
 
       INSERT OR IGNORE INTO schema_migrations (version, applied_at)
       VALUES (1, '${new Date(0).toISOString()}');
-    `);
+`;
+
+export class RunStore {
+  readonly databasePath: string;
+  readonly runsPath: string;
+
+  #database: DatabaseSync;
+
+  constructor(database: DatabaseSync, databasePath: string, runsPath: string) {
+    this.#database = database;
+    this.databasePath = databasePath;
+    this.runsPath = runsPath;
   }
 
   async createRun(input: CreateRunInput): Promise<RunRecord> {
@@ -228,7 +299,7 @@ export class RunStore {
 
     await mkdir(this.runDirectory(input.id), { recursive: true });
 
-    this.#database.run(
+    this.execute(
       `
         INSERT INTO runs (
           id,
@@ -254,12 +325,11 @@ export class RunStore {
       ],
     );
 
-    await this.save();
     return this.getRun(input.id);
   }
 
   async updateRunStatus(runId: string, update: RunStatusUpdate): Promise<RunRecord> {
-    this.#database.run(
+    const result = this.execute(
       `
         UPDATE runs
         SET status = ?,
@@ -281,13 +351,12 @@ export class RunStore {
       ],
     );
 
-    assertRowsChanged(this.#database, `Run ${runId} does not exist.`);
-    await this.save();
+    assertRowsChanged(result, `Run ${runId} does not exist.`);
     return this.getRun(runId);
   }
 
   async startPhase(input: StartPhaseInput): Promise<PhaseRecord> {
-    this.#database.run(
+    const result = this.execute(
       `
         INSERT INTO phases (run_id, name, status, started_at, log_path)
         VALUES (?, ?, ?, ?, ?)
@@ -301,13 +370,11 @@ export class RunStore {
       ],
     );
 
-    const phaseId = getLastInsertId(this.#database);
-    await this.save();
-    return this.getPhase(phaseId);
+    return this.getPhase(toNumber(result.lastInsertRowid));
   }
 
   async finishPhase(input: FinishPhaseInput): Promise<PhaseRecord> {
-    this.#database.run(
+    const result = this.execute(
       `
         UPDATE phases
         SET status = ?,
@@ -323,13 +390,12 @@ export class RunStore {
       ],
     );
 
-    assertRowsChanged(this.#database, `Phase ${input.phaseId} does not exist.`);
-    await this.save();
+    assertRowsChanged(result, `Phase ${input.phaseId} does not exist.`);
     return this.getPhase(input.phaseId);
   }
 
   async addReviewCycle(input: AddReviewCycleInput): Promise<ReviewCycleRecord> {
-    this.#database.run(
+    const result = this.execute(
       `
         INSERT INTO review_cycles (run_id, cycle, decision, report_path)
         VALUES (?, ?, ?, ?)
@@ -337,9 +403,7 @@ export class RunStore {
       [input.runId, input.cycle, input.decision, input.reportPath],
     );
 
-    const reviewCycleId = getLastInsertId(this.#database);
-    await this.save();
-    return this.getReviewCycle(reviewCycleId);
+    return this.getReviewCycle(toNumber(result.lastInsertRowid));
   }
 
   async writeArtifact(runId: string, name: string, content: string): Promise<string> {
@@ -360,13 +424,13 @@ export class RunStore {
   }
 
   listRuns(): RunRecord[] {
-    return selectRows(this.#database, "SELECT * FROM runs ORDER BY started_at DESC").map(
+    return this.selectRows("SELECT * FROM runs ORDER BY started_at DESC").map(
       rowToRunRecord,
     );
   }
 
   getRun(runId: string): RunRecord {
-    const row = selectOne(this.#database, "SELECT * FROM runs WHERE id = ?", [runId]);
+    const row = this.selectOne("SELECT * FROM runs WHERE id = ?", [runId]);
 
     if (row === undefined) {
       throw new Error(`Run ${runId} does not exist.`);
@@ -377,13 +441,11 @@ export class RunStore {
 
   getRunDetails(runId: string): RunDetails {
     const run = this.getRun(runId);
-    const phases = selectRows(
-      this.#database,
+    const phases = this.selectRows(
       "SELECT * FROM phases WHERE run_id = ? ORDER BY id ASC",
       [runId],
     ).map(rowToPhaseRecord);
-    const reviewCycles = selectRows(
-      this.#database,
+    const reviewCycles = this.selectRows(
       "SELECT * FROM review_cycles WHERE run_id = ? ORDER BY cycle ASC",
       [runId],
     ).map(rowToReviewCycleRecord);
@@ -400,12 +462,20 @@ export class RunStore {
     this.#database.close();
   }
 
-  async save(): Promise<void> {
-    await writeFile(this.databasePath, this.#database.export());
+  private execute(sql: string, params: SQLInputValue[]): StatementResultingChanges {
+    return this.#database.prepare(sql).run(...params);
+  }
+
+  private selectRows(sql: string, params: SQLInputValue[] = []): Row[] {
+    return this.#database.prepare(sql).all(...params);
+  }
+
+  private selectOne(sql: string, params: SQLInputValue[] = []): Row | undefined {
+    return this.#database.prepare(sql).get(...params);
   }
 
   private getPhase(phaseId: number): PhaseRecord {
-    const row = selectOne(this.#database, "SELECT * FROM phases WHERE id = ?", [phaseId]);
+    const row = this.selectOne("SELECT * FROM phases WHERE id = ?", [phaseId]);
 
     if (row === undefined) {
       throw new Error(`Phase ${phaseId} does not exist.`);
@@ -415,7 +485,7 @@ export class RunStore {
   }
 
   private getReviewCycle(reviewCycleId: number): ReviewCycleRecord {
-    const row = selectOne(this.#database, "SELECT * FROM review_cycles WHERE id = ?", [
+    const row = this.selectOne("SELECT * FROM review_cycles WHERE id = ?", [
       reviewCycleId,
     ]);
 
@@ -427,64 +497,8 @@ export class RunStore {
   }
 }
 
-async function loadSqlJs(): Promise<SqlJsStatic> {
-  sqlJsPromise ??= initSqlJs({
-    locateFile: (fileName) => require.resolve(`sql.js/dist/${fileName}`),
-  });
-
-  return await sqlJsPromise;
-}
-
-async function openDatabase(sqlJs: SqlJsStatic, databasePath: string): Promise<Database> {
-  try {
-    const data = await readFile(databasePath);
-    return new sqlJs.Database(data);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return new sqlJs.Database();
-    }
-
-    throw error;
-  }
-}
-
-function selectRows(
-  database: Database,
-  sql: string,
-  params: SqlValue[] = [],
-): ParamsObject[] {
-  const statement = database.prepare(sql);
-
-  try {
-    statement.bind(params);
-    const rows: ParamsObject[] = [];
-
-    while (statement.step()) {
-      rows.push(statement.getAsObject());
-    }
-
-    return rows;
-  } finally {
-    statement.free();
-  }
-}
-
-function selectOne(
-  database: Database,
-  sql: string,
-  params: SqlValue[] = [],
-): ParamsObject | undefined {
-  return selectRows(database, sql, params).at(0);
-}
-
-function getLastInsertId(database: Database): number {
-  const row = selectOne(database, "SELECT last_insert_rowid() AS id");
-
-  if (row === undefined) {
-    throw new Error("Could not read last inserted id.");
-  }
-
-  return readNumber(row, "id");
+function toNumber(value: number | bigint): number {
+  return typeof value === "bigint" ? Number(value) : value;
 }
 
 function defaultArtifactPaths(store: RunStore, runId: string): Record<string, string> {
@@ -497,7 +511,7 @@ function defaultArtifactPaths(store: RunStore, runId: string): Record<string, st
   };
 }
 
-function rowToRunRecord(row: ParamsObject): RunRecord {
+function rowToRunRecord(row: Row): RunRecord {
   return {
     id: readString(row, "id"),
     issueUrl: readString(row, "issue_url"),
@@ -513,7 +527,7 @@ function rowToRunRecord(row: ParamsObject): RunRecord {
   };
 }
 
-function rowToPhaseRecord(row: ParamsObject): PhaseRecord {
+function rowToPhaseRecord(row: Row): PhaseRecord {
   return {
     id: readNumber(row, "id"),
     runId: readString(row, "run_id"),
@@ -525,7 +539,7 @@ function rowToPhaseRecord(row: ParamsObject): PhaseRecord {
   };
 }
 
-function rowToReviewCycleRecord(row: ParamsObject): ReviewCycleRecord {
+function rowToReviewCycleRecord(row: Row): ReviewCycleRecord {
   return {
     id: readNumber(row, "id"),
     runId: readString(row, "run_id"),
@@ -535,7 +549,7 @@ function rowToReviewCycleRecord(row: ParamsObject): ReviewCycleRecord {
   };
 }
 
-function readString(row: ParamsObject, key: string): string {
+function readString(row: Row, key: string): string {
   const value = row[key];
 
   if (typeof value !== "string") {
@@ -545,7 +559,7 @@ function readString(row: ParamsObject, key: string): string {
   return value;
 }
 
-function readNullableString(row: ParamsObject, key: string): string | null {
+function readNullableString(row: Row, key: string): string | null {
   const value = row[key];
 
   if (value === null) {
@@ -559,7 +573,7 @@ function readNullableString(row: ParamsObject, key: string): string | null {
   return value;
 }
 
-function readNumber(row: ParamsObject, key: string): number {
+function readNumber(row: Row, key: string): number {
   const value = row[key];
 
   if (typeof value !== "number") {
@@ -569,11 +583,11 @@ function readNumber(row: ParamsObject, key: string): number {
   return value;
 }
 
-function readRunStatus(row: ParamsObject, key: string): RunStatus {
+function readRunStatus(row: Row, key: string): RunStatus {
   return readEnum(row, key, runStatuses);
 }
 
-function readNullableFailureCode(row: ParamsObject, key: string): FailureCode | null {
+function readNullableFailureCode(row: Row, key: string): FailureCode | null {
   const value = row[key];
 
   if (value === null) {
@@ -587,20 +601,20 @@ function readNullableFailureCode(row: ParamsObject, key: string): FailureCode | 
   return value;
 }
 
-function readPhaseName(row: ParamsObject, key: string): PhaseName {
+function readPhaseName(row: Row, key: string): PhaseName {
   return readEnum(row, key, phaseNames);
 }
 
-function readPhaseStatus(row: ParamsObject, key: string): PhaseStatus {
+function readPhaseStatus(row: Row, key: string): PhaseStatus {
   return readEnum(row, key, ["running", "passed", "failed", "skipped"] as const);
 }
 
-function readReviewDecision(row: ParamsObject, key: string): ReviewDecision {
+function readReviewDecision(row: Row, key: string): ReviewDecision {
   return readEnum(row, key, ["pass", "blocking"] as const);
 }
 
 function readEnum<const TValue extends string>(
-  row: ParamsObject,
+  row: Row,
   key: string,
   values: readonly TValue[],
 ): TValue {
@@ -620,16 +634,12 @@ function isOneOf<const TValue extends string>(
   return values.includes(value as TValue);
 }
 
-function assertRowsChanged(database: Database, message: string): void {
-  if (database.getRowsModified() === 0) {
+function assertRowsChanged(result: StatementResultingChanges, message: string): void {
+  if (toNumber(result.changes) === 0) {
     throw new Error(message);
   }
 }
 
 function toIsoString(date: Date): string {
   return date.toISOString();
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
