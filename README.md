@@ -106,6 +106,8 @@ codex-cage runs list
 codex-cage runs show <run-id>
 ```
 
+To have an agent split a feature into issues and run each one, install the [`codex-cage-delegate` skill](docs/workflow.md#delegating-from-an-agent).
+
 ## Command Reference
 
 Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI help.
