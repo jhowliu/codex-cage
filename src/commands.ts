@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { checkIssue, type IssueCheckResult } from "./check.js";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { createControlRoomServer } from "./control-room.js";
 import { doctorProject, type DoctorResult } from "./doctor.js";
@@ -87,6 +88,21 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         printDoctorResult(result, createColorizer(process.stdout));
       }
       if (!result.healthy) process.exitCode = 1;
+    });
+
+  program
+    .command("check")
+    .description("Check whether an issue is ready for a Codex Cage run.")
+    .argument("<issue-url>", "GitHub or Linear issue URL")
+    .option("--json", "print the machine-readable check result")
+    .action(async (issueUrl: string, options: { json?: boolean }) => {
+      const result = await checkIssue(process.cwd(), issueUrl);
+      if (options.json === true) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        printIssueCheckResult(result, createColorizer(process.stdout));
+      }
+      if (!result.ready) process.exitCode = 1;
     });
 
   program
@@ -344,6 +360,26 @@ function printSetupResult(result: SetupResult, color: Colorizer): void {
   );
   if (result.dryRun) console.log(color.warning("Dry run only; no files were changed."));
   for (const notice of result.notices) console.log(color.warning(notice));
+}
+
+function printIssueCheckResult(result: IssueCheckResult, color: Colorizer): void {
+  if (result.issue !== null) {
+    console.log(
+      `${color.label("Issue")}: ${result.issue.identifier} ${result.issue.title}`,
+    );
+  }
+
+  for (const finding of result.findings) {
+    const marker =
+      finding.level === "error" ? color.failure("fail") : color.warning("warn");
+    console.log(`${marker} ${finding.message}`);
+  }
+
+  console.log(
+    result.ready
+      ? `${color.success("ready")}: the issue can start a run`
+      : `${color.failure("not ready")}: fix the failures above before running`,
+  );
 }
 
 function printDoctorResult(result: DoctorResult, color: Colorizer): void {

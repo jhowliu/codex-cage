@@ -1,8 +1,10 @@
+import { z } from "zod";
 import {
   type FetchIssueContextOptions,
   type IssueContext,
   type ParsedGithubIssueUrl,
 } from "./issue.js";
+import type { GithubIssueReference, IssueState } from "./issue-readiness.js";
 import {
   defaultCommentSelection,
   readOptionalString,
@@ -93,6 +95,27 @@ export async function fetchGithubIssueContext(
     comments,
     inferredRepo: issue.inferredRepo,
   };
+}
+
+const githubIssueStateSchema = z.object({ state: z.enum(["open", "closed"]) });
+
+export type FetchGithubIssueStateOptions = {
+  githubToken?: string | undefined;
+  fetch?: typeof fetch;
+};
+
+/** Reads whether a GitHub issue or pull request is open or closed. */
+export async function fetchGithubIssueState(
+  reference: GithubIssueReference,
+  options: FetchGithubIssueStateOptions = {},
+): Promise<IssueState> {
+  const payload = await requestJson<unknown>(
+    options.fetch ?? fetch,
+    `https://api.github.com/repos/${reference.owner}/${reference.repo}/issues/${reference.number}`,
+    { headers: githubHeaders(options.githubToken) },
+  );
+
+  return githubIssueStateSchema.parse(payload).state;
 }
 
 function githubHeaders(token: string | undefined): Record<string, string> {

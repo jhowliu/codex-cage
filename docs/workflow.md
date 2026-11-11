@@ -236,6 +236,21 @@ Doctor validates the shared config, Git repository, Docker daemon, local credent
 
 `--probe` also makes one minimal call per configured agent, the way a run does: in `runtime.image`, with only that provider's credentials, read-only, with structured output. It takes a few seconds and a few tokens. It catches problems that a credential check that only looks at files misses: an expired or invalid token, a model the account cannot use, and an agent CLI in the image that is too old for the model. Roles that share a provider and model are probed once. Direct mode skips the probe, because agents run on the CI runner. Interactive `codex-cage setup` runs the probe at the end; `setup --yes` does not.
 
+## Issue Readiness
+
+```bash
+codex-cage check <issue-url>
+codex-cage check <issue-url> --json
+```
+
+`check` tells you whether an issue is ready to hand to `codex-cage run`. Run it before `run`; `run` itself does not repeat the check. It reads the issue body and:
+
+- **fails** when an issue listed under a `## Blocked by` heading is still open, or cannot be looked up. References can be `#N` (same repository as the issue), `owner/repo#N`, or a full issue or pull request URL. A section that lists no references, such as `None - can start immediately`, passes.
+- **warns** when the `## What to build` or `## Acceptance criteria` section is missing or empty. Warnings do not make the check fail.
+- **fails** when `.codex-cage.yml` is missing or invalid.
+
+`check` exits non-zero when the issue is not ready, so a script or agent can gate `run` on it: `codex-cage check <issue-url> && codex-cage run <issue-url>`. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
+
 ## Docker Compose Services
 
 Compose services are started by the host-side Codex Cage orchestrator, not by the implementation agent. Codex Cage runs `docker compose up -d` with a per-run project name, attaches the agent container to the Compose network, runs each `services.ready` command from a short-lived container on that same network, and tears services down with `docker compose down -v`.
