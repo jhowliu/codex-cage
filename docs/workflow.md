@@ -251,6 +251,27 @@ codex-cage check <issue-url> --json
 
 `check` exits non-zero when the issue is not ready, so a script or agent can gate `run` on it: `codex-cage check <issue-url> && codex-cage run <issue-url>`. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
 
+## Delegating From An Agent
+
+`skills/codex-cage-delegate` is an agent skill that lets a planning agent, such as Claude Code, hand work to Codex Cage. Install it from this repository:
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$PWD/skills/codex-cage-delegate" ~/.claude/skills/codex-cage-delegate
+```
+
+For another agent, link the same folder into that agent's skills directory.
+
+From the target repository's checkout, ask the agent to delegate a feature or a list of issues to codex-cage. The skill:
+
+1. Sizes the request and asks only about one-way-door decisions, such as public interfaces and data formats.
+2. Writes one issue per task with the `## What to build`, `## Acceptance criteria`, and `## Blocked by` sections.
+3. Runs `codex-cage check` on each issue. An issue with an open blocker waits until the blocker's PR merges.
+4. Starts `codex-cage run` for every ready issue in parallel, always in Docker mode. Inside herdr, each run gets its own pane in a background `cage` tab, so your current view stays put.
+5. Waits for each run and reports its PR URL, or its failure code and `codex-cage runs show <run-id>`. Panes of failed runs stay open for inspection.
+
+Each run writes its result to `.codex-cage/runs/delegate-<issue-number>.json` with `run --result-json`. `.codex-cage/runs/` is already ignored by Git.
+
 ## Docker Compose Services
 
 Compose services are started by the host-side Codex Cage orchestrator, not by the implementation agent. Codex Cage runs `docker compose up -d` with a per-run project name, attaches the agent container to the Compose network, runs each `services.ready` command from a short-lived container on that same network, and tears services down with `docker compose down -v`.
