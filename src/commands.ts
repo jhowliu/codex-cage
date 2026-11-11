@@ -94,9 +94,10 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     .command("check")
     .description("Check whether an issue is ready for a Codex Cage run.")
     .argument("<issue-url>", "GitHub or Linear issue URL")
+    .option("--repo <repo>", "target GitHub repository override, as for run")
     .option("--json", "print the machine-readable check result")
-    .action(async (issueUrl: string, options: { json?: boolean }) => {
-      const result = await checkIssue(process.cwd(), issueUrl);
+    .action(async (issueUrl: string, options: { repo?: string; json?: boolean }) => {
+      const result = await checkIssue(process.cwd(), { issueUrl, repo: options.repo });
       if (options.json === true) {
         console.log(JSON.stringify(result, null, 2));
       } else {

@@ -240,14 +240,15 @@ Doctor validates the shared config, Git repository, Docker daemon, local credent
 
 ```bash
 codex-cage check <issue-url>
+codex-cage check <issue-url> --repo owner/name
 codex-cage check <issue-url> --json
 ```
 
-`check` runs the same readiness check that `codex-cage run` performs in its `preflight` phase, without starting a run. It reads the issue body and:
+`check` answers "would `codex-cage run` start on this issue?" without starting a run. It resolves the run's inputs with the same code `run` uses, then reads the issue body. It:
 
 - **fails** when an issue listed under a `## Blocked by` heading is still open, or cannot be looked up. References can be `#N` (same repository as the issue), `owner/repo#N`, or a full issue or pull request URL. A section that lists no references, such as `None - can start immediately`, passes.
 - **warns** when the `## What to build` or `## Acceptance criteria` section is missing or empty. Warnings never stop a run.
-- **fails** when `.codex-cage.yml` is missing or invalid.
+- **fails** on anything that would stop `run` before it starts, with the failure code `run` would report: a missing or invalid `.codex-cage.yml`, an issue that cannot be fetched, a target repository that cannot be resolved or does not match the current git origin, or a missing GitHub token. Pass `--repo` exactly as you would to `run`.
 
 `check` exits non-zero when the issue is not ready. A `run` on a blocked issue stops with `issue_blocked` before any Docker resources are created. Its `summary.md` lists the open blockers, so the generated Actions workflow posts them in its failure comment. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
 
