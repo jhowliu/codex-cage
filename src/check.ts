@@ -1,24 +1,21 @@
-import type { ReadinessFinding } from "./issue-readiness.js";
-import { RunFailureError } from "./run/errors.js";
+import { loadCodexCageConfigFile } from "./config-file.js";
+import { prepareRunCredentials, readRunEnv } from "./credentials.js";
+import { ghTokenLookup, type GithubTokenLookup } from "./github-auth.js";
+import { fetchIssueContext } from "./issue.js";
+import { fetchGithubIssueState } from "./issue-github.js";
 import {
-  resolveRunTarget,
-  type RunTarget,
-  type RunTargetDependencies,
-  type RunTargetOptions,
-} from "./run.js";
-import type { FailureCode } from "./state.js";
+  checkIssueReadiness,
+  type IssueStateLookup,
+  type ReadinessFinding,
+} from "./issue-readiness.js";
 
-/**
- * A setup problem that would stop `codex-cage run` before it starts, with the
- * failure code the run would report.
- */
-export type RunSetupFinding = {
+export type ConfigFinding = {
   level: "error";
-  code: FailureCode;
+  code: "missing_config" | "invalid_config";
   message: string;
 };
 
-export type CheckFinding = ReadinessFinding | RunSetupFinding;
+export type CheckFinding = ReadinessFinding | ConfigFinding;
 
 export type IssueCheckResult = {
   issueUrl: string;
@@ -27,44 +24,80 @@ export type IssueCheckResult = {
   findings: CheckFinding[];
 };
 
-export type CheckIssueOptions = RunTargetOptions;
-export type CheckIssueDependencies = RunTargetDependencies;
+export type CheckIssueDependencies = {
+  fetchIssueContext?: typeof fetchIssueContext;
+  lookupIssueState?: IssueStateLookup;
+  readEnv?: (cwd: string) => Promise<Record<string, string>>;
+  findGithubToken?: GithubTokenLookup;
+};
 
 /**
- * Answers "would `codex-cage run` start on this issue?" without creating a
- * run. It resolves the run's inputs through the same `resolveRunTarget` the
- * run uses, so a setup failure (config, issue, target repo, GitHub token)
- * or an unready issue stops both commands alike.
+ * Checks whether an issue is ready to hand to `codex-cage run`: the repository
+ * config must be valid and every issue under "Blocked by" must be closed.
+ * Missing template sections only warn. `run` does not repeat this check, so
+ * callers such as a delegating agent run it first.
  */
 export async function checkIssue(
   cwd: string,
-  options: CheckIssueOptions,
+  issueUrl: string,
   dependencies: CheckIssueDependencies = {},
 ): Promise<IssueCheckResult> {
-  let target: RunTarget;
+  const configFile = await loadCodexCageConfigFile(cwd);
 
-  try {
-    target = await resolveRunTarget(cwd, options, dependencies);
-  } catch (error) {
-    return {
-      issueUrl: options.issueUrl,
-      issue: null,
-      ready: false,
-      findings: [
-        {
-          level: "error",
-          // `codex-cage run` reports the same code for an error at this point.
-          code: error instanceof RunFailureError ? error.failureCode : "internal_error",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      ],
-    };
+  switch (configFile.status) {
+    case "missing":
+      return notReady(issueUrl, {
+        level: "error",
+        code: "missing_config",
+        message: ".codex-cage.yml was not found. Run `codex-cage setup` first.",
+      });
+    case "invalid":
+      return notReady(issueUrl, {
+        level: "error",
+        code: "invalid_config",
+        message: `.codex-cage.yml is invalid: ${configFile.errors
+          .map((error) => error.message)
+          .join("; ")}`,
+      });
+    case "valid":
+      break;
+    default: {
+      const exhaustive: never = configFile;
+      return exhaustive;
+    }
   }
 
+  const { config } = configFile;
+  const credentials = await prepareRunCredentials({
+    cwd,
+    agents: {
+      implement: config.agent.implement.provider,
+      review: config.agent.review.provider,
+    },
+    readEnv: dependencies.readEnv ?? readRunEnv,
+    // The check only reads issues; it never starts an agent.
+    findCodexAuthFile: async () => null,
+    findGithubToken: dependencies.findGithubToken ?? ghTokenLookup,
+  });
+  const fetchIssue = dependencies.fetchIssueContext ?? fetchIssueContext;
+  const issue = await fetchIssue(
+    issueUrl,
+    credentials.issueOptions(config.issue.comments),
+  );
+  const lookupIssueState =
+    dependencies.lookupIssueState ??
+    ((reference) =>
+      fetchGithubIssueState(reference, { githubToken: credentials.githubToken() }));
+  const readiness = await checkIssueReadiness(issue, lookupIssueState);
+
   return {
-    issueUrl: options.issueUrl,
-    issue: { identifier: target.issue.identifier, title: target.issue.title },
-    ready: target.issueReadiness.ready,
-    findings: target.issueReadiness.findings,
+    issueUrl,
+    issue: { identifier: issue.identifier, title: issue.title },
+    ready: readiness.ready,
+    findings: readiness.findings,
   };
+}
+
+function notReady(issueUrl: string, finding: ConfigFinding): IssueCheckResult {
+  return { issueUrl, issue: null, ready: false, findings: [finding] };
 }

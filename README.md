@@ -114,7 +114,7 @@ Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI hel
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `codex-cage setup`              | Configure local Docker runs and optional GitHub Actions automation.                                             |
 | `codex-cage doctor`             | Diagnose local tools, credentials, workflow, labels, and Actions secrets; `--probe` also test-calls each agent. |
-| `codex-cage check <issue-url>`  | Check whether `run` would start on an issue: same setup steps, and `## Blocked by` issues closed.               |
+| `codex-cage check <issue-url>`  | Check whether an issue is ready to run: its `## Blocked by` issues are closed and the config is valid.          |
 | `codex-cage run <issue-url>`    | Run the full issue-to-PR workflow for a GitHub or Linear issue.                                                 |
 | `codex-cage runs list`          | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.                                                |
 | `codex-cage runs show <run-id>` | Show run metadata, phase status, and artifact paths.                                                            |

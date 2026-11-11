@@ -17,7 +17,6 @@ import {
   type RuntimeImageBuildResult,
 } from "./docker.js";
 import type { IssueContext } from "./issue.js";
-import { formatReadinessFinding, type IssueReadinessReport } from "./issue-readiness.js";
 import { scanDiffForGuardViolations } from "./guards.js";
 import { NoDiffError, publishSuccessfulRun } from "./publish.js";
 import type { PromptContext } from "./prompt-context.js";
@@ -95,7 +94,6 @@ export type RuntimeContext = {
   configWarnings: string[];
   credentials: RunCredentials;
   issue: IssueContext;
-  issueReadiness: IssueReadinessReport;
   repoResolution: RepoResolution;
   authenticatedRepo: AuthenticatedRepo;
   baseBranch: string;
@@ -171,21 +169,11 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
     });
 
     await journal.runPhase("preflight", async () => {
-      const readiness = context.issueReadiness.findings.map(formatReadinessFinding);
-
-      if (!context.issueReadiness.ready) {
-        throw new RunFailureError(
-          "issue_blocked",
-          ["Issue is not ready for a run:", ...readiness].join("\n"),
-        );
-      }
-
       return [
         `Issue: ${context.issue.identifier} ${context.issue.title}`,
         `Repo: ${context.repoResolution.repo.fullName}`,
         `Base: ${context.baseBranch}`,
         `Branch: ${context.branchName}`,
-        ...readiness,
       ].join("\n");
     });
 

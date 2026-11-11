@@ -240,17 +240,16 @@ Doctor validates the shared config, Git repository, Docker daemon, local credent
 
 ```bash
 codex-cage check <issue-url>
-codex-cage check <issue-url> --repo owner/name
 codex-cage check <issue-url> --json
 ```
 
-`check` answers "would `codex-cage run` start on this issue?" without starting a run. It resolves the run's inputs with the same code `run` uses, then reads the issue body. It:
+`check` tells you whether an issue is ready to hand to `codex-cage run`. Run it before `run`; `run` itself does not repeat the check. It reads the issue body and:
 
 - **fails** when an issue listed under a `## Blocked by` heading is still open, or cannot be looked up. References can be `#N` (same repository as the issue), `owner/repo#N`, or a full issue or pull request URL. A section that lists no references, such as `None - can start immediately`, passes.
-- **warns** when the `## What to build` or `## Acceptance criteria` section is missing or empty. Warnings never stop a run.
-- **fails** on anything that would stop `run` before it starts, with the failure code `run` would report: a missing or invalid `.codex-cage.yml`, an issue that cannot be fetched, a target repository that cannot be resolved or does not match the current git origin, or a missing GitHub token. Pass `--repo` exactly as you would to `run`.
+- **warns** when the `## What to build` or `## Acceptance criteria` section is missing or empty. Warnings do not make the check fail.
+- **fails** when `.codex-cage.yml` is missing or invalid.
 
-`check` exits non-zero when the issue is not ready. A `run` on a blocked issue stops with `issue_blocked` before any Docker resources are created. Its `summary.md` lists the open blockers, so the generated Actions workflow posts them in its failure comment. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
+`check` exits non-zero when the issue is not ready, so a script or agent can gate `run` on it: `codex-cage check <issue-url> && codex-cage run <issue-url>`. For Linear issues, `#N` references cannot be resolved to a repository; they are reported as warnings and not checked.
 
 ## Docker Compose Services
 
@@ -336,7 +335,6 @@ For automation, `codex-cage run` emits a deterministic outcome so a workflow can
 | Code                                | Meaning                                                                                                                         |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `missing_config`, `invalid_config`  | `.codex-cage.yml` is missing or does not match the schema.                                                                      |
-| `issue_blocked`                     | An issue under the issue's `## Blocked by` heading is still open or could not be checked. Nothing was provisioned.              |
 | `runtime_image_failed`              | Building `runtime.dockerfile` failed.                                                                                           |
 | `docker_unavailable`                | The docker CLI is not on `PATH`, or the Docker daemon does not answer.                                                          |
 | `clone_failed`                      | Cloning the repository or checking out the base branch failed: no access, an empty repository, or an unknown base branch.       |

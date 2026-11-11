@@ -19,8 +19,6 @@ import {
 } from "./docker.js";
 import { ghTokenLookup, type GithubTokenLookup } from "./github-auth.js";
 import { fetchIssueContext } from "./issue.js";
-import { fetchGithubIssueState } from "./issue-github.js";
-import { checkIssueReadiness, type IssueStateLookup } from "./issue-readiness.js";
 import { generateBranchName, type publishSuccessfulRun } from "./publish.js";
 import { buildPromptContext } from "./prompt-context.js";
 import { createAuthenticatedRepo, resolveTargetRepo } from "./repo.js";
@@ -52,7 +50,6 @@ export type RunCommandOptions = {
 
 export type RunCodexCageDependencies = {
   fetchIssueContext?: typeof fetchIssueContext;
-  lookupIssueState?: IssueStateLookup;
   resolveTargetRepo?: typeof resolveTargetRepo;
   createAuthenticatedRepo?: typeof createAuthenticatedRepo;
   readEnv?: (cwd: string) => Promise<Record<string, string>>;
@@ -127,67 +124,37 @@ export async function runCodexCage(
   }
 }
 
-/**
- * What a run resolves before it creates a run record: config, credentials,
- * the issue and its readiness, and the target repository with its token.
- */
-export type RunTarget = Pick<
-  RuntimeContext,
-  | "config"
-  | "configWarnings"
-  | "credentials"
-  | "issue"
-  | "issueReadiness"
-  | "repoResolution"
-  | "authenticatedRepo"
->;
-
-export type RunTargetOptions = Pick<RunCommandOptions, "issueUrl" | "repo">;
-
-export type RunTargetDependencies = Pick<
-  RunCodexCageDependencies,
-  | "fetchIssueContext"
-  | "lookupIssueState"
-  | "resolveTargetRepo"
-  | "createAuthenticatedRepo"
-  | "readEnv"
-  | "findCodexAuthFile"
-  | "findGithubToken"
->;
-
-/**
- * Resolves a run's inputs without starting it. `codex-cage run` and
- * `codex-cage check` both call this, so `check` fails on exactly the setup
- * problems that would stop a run, with the same failure codes. Readiness
- * findings are returned, not thrown: `run` turns an unready issue into
- * `issue_blocked` in its preflight phase so the failure is recorded.
- */
-export async function resolveRunTarget(
+async function prepareRuntimeContext(
   cwd: string,
-  options: RunTargetOptions,
-  dependencies: RunTargetDependencies = {},
-): Promise<RunTarget> {
-  const { config, warnings } = await readConfig(cwd);
+  options: RunCommandOptions,
+  dependencies: RunCodexCageDependencies,
+): Promise<RuntimeContext> {
+  const configResult = await readConfig(cwd);
+  const readEnv = dependencies.readEnv ?? readRunEnv;
+  const fetchContext = dependencies.fetchIssueContext ?? fetchIssueContext;
+  const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
+  const authenticateRepo =
+    dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
+  const locateCodexAuthFile = dependencies.findCodexAuthFile ?? findCodexAuthFile;
+  const agentConfig = configResult.config.agent;
+  const agents: AgentAssignments = {
+    implement: {
+      provider: agentConfig.implement.provider,
+      model: options.model ?? agentConfig.implement.model,
+    },
+    review: agentConfig.review,
+  };
   const credentials = await prepareRunCredentials({
     cwd,
-    agents: {
-      implement: config.agent.implement.provider,
-      review: config.agent.review.provider,
-    },
-    readEnv: dependencies.readEnv ?? readRunEnv,
-    findCodexAuthFile: dependencies.findCodexAuthFile ?? findCodexAuthFile,
+    agents: { implement: agents.implement.provider, review: agents.review.provider },
+    readEnv,
+    findCodexAuthFile: locateCodexAuthFile,
     findGithubToken: dependencies.findGithubToken ?? ghTokenLookup,
   });
-  const fetchContext = dependencies.fetchIssueContext ?? fetchIssueContext;
   const issue = await fetchContext(
     options.issueUrl,
-    credentials.issueOptions(config.issue.comments),
+    credentials.issueOptions(configResult.config.issue.comments),
   );
-  const lookupIssueState =
-    dependencies.lookupIssueState ??
-    ((reference) =>
-      fetchGithubIssueState(reference, { githubToken: credentials.githubToken() }));
-  const issueReadiness = await checkIssueReadiness(issue, lookupIssueState);
   const repoInput: Parameters<typeof resolveTargetRepo>[0] = {
     issue,
     cwd,
@@ -197,46 +164,17 @@ export async function resolveRunTarget(
     repoInput.explicitRepo = options.repo;
   }
 
-  const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
   const repoResolution = await resolveRepo(repoInput);
-  const authenticateRepo =
-    dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
   const authenticatedRepo = authenticateRepo(
     repoResolution.repo,
     credentials.githubToken(),
   );
-
-  return {
-    config,
-    configWarnings: warnings,
-    credentials,
-    issue,
-    issueReadiness,
-    repoResolution,
-    authenticatedRepo,
-  };
-}
-
-async function prepareRuntimeContext(
-  cwd: string,
-  options: RunCommandOptions,
-  dependencies: RunCodexCageDependencies,
-): Promise<RuntimeContext> {
-  const target = await resolveRunTarget(cwd, options, dependencies);
-  const { config, issue } = target;
-  const agents: AgentAssignments = {
-    implement: {
-      provider: config.agent.implement.provider,
-      model: options.model ?? config.agent.implement.model,
-    },
-    review: config.agent.review,
-  };
-  const baseBranch = options.base ?? config.git.base;
-  const draft = options.draft ?? config.pr.draft;
+  const baseBranch = options.base ?? configResult.config.git.base;
+  const draft = options.draft ?? configResult.config.pr.draft;
   const runId = options.runId ?? dependencies.generateRunId?.() ?? generateRunId();
   const branchName = generateBranchName({ issue, runId });
   const runtimeImage = {
-    image: config.runtime.image,
+    image: configResult.config.runtime.image,
     dockerfilePath: "",
     contextPath: "",
     source: "configured" as const,
@@ -246,12 +184,17 @@ async function prepareRuntimeContext(
     dependencies.executionMode ??
     resolveExecutionMode({
       env: process.env,
-      config,
+      config: configResult.config,
     });
 
   return {
-    ...target,
     cwd,
+    config: configResult.config,
+    configWarnings: configResult.warnings,
+    credentials,
+    issue,
+    repoResolution,
+    authenticatedRepo,
     baseBranch,
     agents,
     draft,
