@@ -74,7 +74,11 @@ mkdir -p .agent-cage/runs && rm -f .agent-cage/runs/planner-<n>.json
 AGENT_CAGE_EXECUTION=docker agent-cage run <issue-url> --result-json .agent-cage/runs/planner-<n>.json
 ```
 
-`AGENT_CAGE_EXECUTION=docker` keeps the run in the Docker sandbox even when the config selects direct mode. Keep working with the user while the runs go.
+`AGENT_CAGE_EXECUTION=docker` keeps the run in the Docker sandbox even when the config selects direct mode.
+
+When `printenv AGENT_CAGE_LAUNCHER` prints a command, such as `herdr-issues launch`, put that command in place of `agent-cage run`. A launcher takes the same arguments, starts the run where the user can watch it, exits when the run ends, and leaves the same result file.
+
+Keep working with the user while the runs go.
 
 ## 5. Wait and report
 

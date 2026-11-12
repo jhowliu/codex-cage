@@ -234,6 +234,12 @@ From the target repository's checkout, ask the agent to delegate a feature or a 
 
 Each run writes its result to `.agent-cage/runs/planner-<issue-number>.json` with `run --result-json`, for the skill to read. `.agent-cage/runs/` is already ignored by Git. Other tools follow runs with `agent-cage runs list --json`, which covers every run, however it was started.
 
+To start runs somewhere the user can watch them, such as a terminal multiplexer pane, set `AGENT_CAGE_LAUNCHER` to a command that takes `agent-cage run`'s arguments (`<issue-url> --result-json <file>`), returns when the run ends, and leaves the same result file. The skill then runs that command in place of `agent-cage run`. For example, [herdr-issues](https://github.com/jhowliu/herder-issues) runs each one in a herdr pane, where herdr shows its stage:
+
+```bash
+export AGENT_CAGE_LAUNCHER="$HOME/Developer/herdr-issues/bin/herdr-issues launch"
+```
+
 ## Docker Compose Services
 
 Compose services are started by the host-side Agent Cage orchestrator, not by the implementation agent. Agent Cage runs `docker compose up -d` with a per-run project name, attaches the agent container to the Compose network, runs each `services.ready` command from a short-lived container on that same network, and tears services down with `docker compose down -v`.

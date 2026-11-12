@@ -61,3 +61,10 @@ test("the planner skill pins runs to Docker with the variable run reads", async 
 
   assert.match(skill, new RegExp(`${AGENT_CAGE_EXECUTION_ENV}=docker agent-cage run `));
 });
+
+test("the planner skill lets a launcher start runs where the user can watch them", async () => {
+  const skill = await readFile(skillUrl, "utf8");
+
+  assert.match(skill, /`printenv AGENT_CAGE_LAUNCHER`/);
+  assert.match(skill, /in place of `agent-cage run`/);
+});
