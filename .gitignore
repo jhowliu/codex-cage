@@ -11,5 +11,4 @@ docs/oat-agents-research.md
 .agent-cage/runs/
 .agent-cage/*.sqlite
 .agent-cage/*.sqlite-*
-.agent-cage/control-room.json
 .codex

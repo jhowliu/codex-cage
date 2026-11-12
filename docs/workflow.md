@@ -24,44 +24,6 @@ npm exec -- agent-cage --help
 
 Node.js `>=22.13` is required (the run store uses the built-in `node:sqlite` module).
 
-## Local Control Room
-
-Start the local Control Room from a host repository:
-
-```bash
-agent-cage control-room
-```
-
-The server binds to `127.0.0.1` by default. Use `--port 0` to select an available
-port, or provide an explicit local port:
-
-```bash
-agent-cage control-room --port 4317
-```
-
-The first Control Room slice supports one local repository and GitHub Issue URLs.
-It reads the repository's `.agent-cage.yml`, refuses to dispatch repositories that
-are not ready, starts the existing Docker-isolated Run workflow in a child Runner,
-and streams the Runner's structured Stage events to the browser. Run state is
-persisted in `.agent-cage/control-room.json`; full logs and other artifacts remain
-under the existing `.agent-cage/runs/<run-id>/` directory.
-
-The Control Room does not expose Docker controls to the browser. The Runner remains
-the execution authority, while the Control Room stores a projection of its validated
-events. GitHub-hosted Actions remains a separate direct-mode workflow and is not
-made live by the local Control Room.
-
-Open a Run and select a stage to see its **Results**: preparation checks and target
-branches, a readable file diff, verification command outcomes, independent review
-findings, or published branch and PR metadata. **Events** and **Logs & artifacts**
-remain available for the selected stage. Result tabs support arrow keys and
-Home/End, and update from the existing live event projection.
-
-Change previews are saved after verification and secret checks. New Runs preserve
-the final patch before publishing commits the workspace. Older Runs without saved
-evidence show an explicit unavailable state; their existing PR remains the source
-for inspecting published changes.
-
 ## Token Setup
 
 Credentials come from two files. Agent and issue-tracker credentials live once per machine in `~/.config/agent-cage/env` (or `$XDG_CONFIG_HOME/agent-cage/env`), mode `600`:

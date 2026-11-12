@@ -3,7 +3,6 @@ import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { checkIssue, type IssueCheckResult } from "./check.js";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
-import { createControlRoomServer } from "./control-room.js";
 import { doctorProject, type DoctorResult } from "./doctor.js";
 import { runAgentCage, type RunAgentCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
@@ -207,21 +206,6 @@ export function createCli(dependencies: CliDependencies = {}): Command {
       },
     );
 
-  program
-    .command("control-room")
-    .description("Start the local Agent Cage Control Room.")
-    .option("--host <host>", "bind address", "127.0.0.1")
-    .option("--port <port>", "listen port", parsePort)
-    .action(async (options: { host: string; port?: number }) => {
-      const controlRoom = await createControlRoomServer({
-        cwd: process.cwd(),
-        host: options.host,
-        ...(options.port === undefined ? {} : { port: options.port }),
-      });
-      console.log(`Control Room: ${controlRoom.url}`);
-      await waitForShutdown(controlRoom.close);
-    });
-
   const runs = program.command("runs").description("Inspect prior Agent Cage runs.");
 
   runs
@@ -339,27 +323,6 @@ function parseOnOff(value: string): boolean {
     default:
       throw new Error('--actions must be "on" or "off".');
   }
-}
-
-function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new Error("--port must be an integer between 0 and 65535.");
-  }
-  return port;
-}
-
-async function waitForShutdown(close: () => Promise<void>): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    let stopping = false;
-    const shutdown = (): void => {
-      if (stopping) return;
-      stopping = true;
-      void close().then(resolve, reject);
-    };
-    process.once("SIGINT", shutdown);
-    process.once("SIGTERM", shutdown);
-  });
 }
 
 function printSetupResult(result: SetupResult, color: Colorizer): void {
