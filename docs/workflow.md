@@ -270,7 +270,7 @@ From the target repository's checkout, ask the agent to delegate a feature or a 
 4. Starts `codex-cage run` for every ready issue in parallel as background commands, always in Docker mode.
 5. Reports each run's PR URL, or its failure code and `codex-cage runs show <run-id>`.
 
-Each run writes its result to `.codex-cage/runs/delegate-<issue-number>.json` with `run --result-json`. `.codex-cage/runs/` is already ignored by Git.
+Each run writes its result to `.codex-cage/runs/delegate-<issue-number>.json` with `run --result-json`, for the skill to read. `.codex-cage/runs/` is already ignored by Git. Other tools follow runs with `codex-cage runs list --json`, which covers every run, however it was started.
 
 ## Docker Compose Services
 

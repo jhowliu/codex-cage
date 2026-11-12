@@ -1,17 +1,23 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   databaseFileName,
+  isProcessAlive,
+  isRunInterrupted,
   openRunStore,
   openRunStoreReadOnly,
   runsDirectoryName,
   stateDirectoryName,
   type CreateRunInput,
+  type RunRecord,
 } from "../src/state.js";
+
+// Above the largest pid Linux or macOS assigns, so no process has it.
+const deadPid = 2 ** 22 + 12_345;
 
 async function tempStateDirectory(): Promise<string> {
   return await mkdtemp(join(tmpdir(), "codex-cage-state-"));
@@ -182,6 +188,109 @@ test("read-only run store treats a repository without a database as having no ru
     assert.throws(() => reader.getRun("missing"), /Run missing does not exist/);
     reader.close();
     assert.equal(existsSync(join(cwd, stateDirectoryName)), false);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("run store records the process that runs each run", async () => {
+  const cwd = await tempStateDirectory();
+
+  try {
+    const store = await openRunStore(cwd);
+
+    assert.equal((await store.createRun(runInput("run-own"))).pid, process.pid);
+    assert.equal(
+      (await store.createRun({ ...runInput("run-other"), pid: 4242 })).pid,
+      4242,
+    );
+    store.close();
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("a run is interrupted only when it never finished and its process is gone", () => {
+  const run = (overrides: Partial<RunRecord>): RunRecord => ({
+    id: "run-1",
+    issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+    issueKey: "GH-4",
+    repo: "jhowliu/codex-cage",
+    baseBranch: "main",
+    branch: "codex-cage/gh-4-run-1",
+    status: "implementing",
+    failureCode: null,
+    prUrl: null,
+    startedAt: "2026-04-25T00:00:00.000Z",
+    finishedAt: null,
+    pid: deadPid,
+    ...overrides,
+  });
+
+  assert.equal(isRunInterrupted(run({})), true);
+  assert.equal(isRunInterrupted(run({ pid: process.pid })), false, "still running");
+  assert.equal(
+    isRunInterrupted(run({ status: "failed", finishedAt: "2026-04-25T00:02:00.000Z" })),
+    false,
+    "finished",
+  );
+  assert.equal(isRunInterrupted(run({ pid: null })), false, "recorded without a pid");
+});
+
+test("a process owned by another user counts as alive", () => {
+  assert.equal(isProcessAlive(process.pid), true);
+  assert.equal(isProcessAlive(deadPid), false);
+  assert.equal(
+    isProcessAlive(1),
+    true,
+    "pid 1 exists, and kill(1, 0) fails with EPERM unless root",
+  );
+});
+
+test("a database from an earlier version gains a pid column and keeps its runs", async () => {
+  const cwd = await tempStateDirectory();
+
+  try {
+    await mkdir(join(cwd, stateDirectoryName), { recursive: true });
+    const { DatabaseSync } = await import("node:sqlite");
+    const old = new DatabaseSync(join(cwd, stateDirectoryName, databaseFileName));
+    old.exec(`
+      CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+      CREATE TABLE runs (
+        id TEXT PRIMARY KEY, issue_url TEXT NOT NULL, issue_key TEXT NOT NULL,
+        repo TEXT NOT NULL, base_branch TEXT NOT NULL, branch TEXT NOT NULL,
+        status TEXT NOT NULL, failure_code TEXT, pr_url TEXT,
+        started_at TEXT NOT NULL, finished_at TEXT
+      );
+      INSERT INTO schema_migrations VALUES (1, '1970-01-01T00:00:00.000Z');
+      INSERT INTO runs (id, issue_url, issue_key, repo, base_branch, branch, status, started_at)
+      VALUES ('run-old', 'https://github.com/jhowliu/codex-cage/issues/4', 'GH-4',
+              'jhowliu/codex-cage', 'main', 'codex-cage/gh-4-run-old', 'implementing',
+              '2026-04-25T00:00:00.000Z');
+    `);
+    old.close();
+
+    const reader = await openRunStoreReadOnly(cwd);
+    assert.equal(
+      reader.getRun("run-old").pid,
+      null,
+      "a read-only store reads it unmigrated",
+    );
+    reader.close();
+
+    const store = await openRunStore(cwd);
+    await store.createRun(runInput("run-new"));
+    assert.equal(store.getRun("run-old").pid, null);
+    assert.equal(store.getRun("run-new").pid, process.pid);
+    store.close();
+
+    const reopened = await openRunStore(cwd);
+    assert.deepEqual(
+      reopened.listRuns().map((run) => run.id),
+      ["run-old", "run-new"],
+      "migrating an up-to-date database changes nothing",
+    );
+    reopened.close();
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

@@ -8,7 +8,12 @@ import { doctorProject, type DoctorResult } from "./doctor.js";
 import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
 import { setupProject, type SetupResult } from "./setup.js";
-import { failureCodes, openRunStoreReadOnly } from "./state.js";
+import {
+  failureCodes,
+  isRunInterrupted,
+  openRunStoreReadOnly,
+  type RunRecord,
+} from "./state.js";
 import { readPackageVersion } from "./version.js";
 
 export const RESULT_FILE_ENV = "CODEX_CAGE_RESULT_FILE";
@@ -222,12 +227,18 @@ export function createCli(dependencies: CliDependencies = {}): Command {
   runs
     .command("list")
     .description("List known runs from local metadata.")
-    .action(async () => {
+    .option("--json", "print the runs as JSON, newest first")
+    .action(async (options: { json?: boolean }) => {
       const store = await openRunStoreReadOnly(process.cwd());
       const color = createColorizer(process.stdout);
 
       try {
         const runs = store.listRuns();
+
+        if (options.json === true) {
+          console.log(JSON.stringify(runs.map(toRunListEntry), null, 2));
+          return;
+        }
 
         if (runs.length === 0) {
           console.log(color.muted("No runs found."));
@@ -238,7 +249,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
           const details = [
             color.info(run.id),
             run.issueKey,
-            color.status(run.status),
+            formatRunStatus(run, color),
             run.failureCode === null ? "-" : color.failure(run.failureCode),
             run.prUrl === null ? "-" : color.link(run.prUrl),
           ];
@@ -262,7 +273,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         const details = store.getRunDetails(runId);
 
         console.log(`${color.label("Run")}: ${color.info(details.run.id)}`);
-        console.log(`${color.label("Status")}: ${color.status(details.run.status)}`);
+        console.log(`${color.label("Status")}: ${formatRunStatus(details.run, color)}`);
         console.log(
           `${color.label("Failure")}: ${
             details.run.failureCode === null
@@ -504,6 +515,18 @@ type Colorizer = {
   muted: (value: string) => string;
   status: (value: string) => string;
 };
+
+/** One run in `runs list --json`. */
+export type RunListEntry = RunRecord & { interrupted: boolean };
+
+function toRunListEntry(run: RunRecord): RunListEntry {
+  return { ...run, interrupted: isRunInterrupted(run) };
+}
+
+function formatRunStatus(run: RunRecord, color: Colorizer): string {
+  const status = color.status(run.status);
+  return isRunInterrupted(run) ? `${status} ${color.failure("interrupted")}` : status;
+}
 
 function createColorizer(stream: NodeJS.WriteStream): Colorizer {
   const enabled = colorEnabled(stream);
