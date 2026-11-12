@@ -328,6 +328,93 @@ test("runs show can emit color when forced", async () => {
   }
 });
 
+test("runs list --json prints each run newest first with whether it was interrupted", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-runs-json-"));
+  // Above the largest pid Linux or macOS assigns, so no process has it.
+  const deadPid = 2 ** 22 + 12_345;
+  const entry = (id: string, minute: number) => ({
+    id,
+    issueUrl: `https://github.com/jhowliu/codex-cage/issues/${minute}`,
+    issueKey: `GH-${minute}`,
+    repo: "jhowliu/codex-cage",
+    baseBranch: "main",
+    branch: `codex-cage/gh-${minute}-${id}`,
+    startedAt: `2026-04-25T00:0${minute}:00.000Z`,
+  });
+
+  try {
+    const store = await openRunStore(cwd);
+    for (const [id, minute, pid] of [
+      ["run-finished", 1, deadPid],
+      ["run-crashed", 2, deadPid],
+      ["run-live", 3, process.pid],
+    ] as const) {
+      const { startedAt, ...input } = entry(id, minute);
+      await store.createRun({ ...input, startedAt: new Date(startedAt), pid });
+    }
+    await store.updateRunStatus("run-finished", {
+      status: "failed",
+      failureCode: "verify_failed",
+      finishedAt: new Date("2026-04-25T00:05:00.000Z"),
+    });
+    await store.updateRunStatus("run-crashed", { status: "implementing" });
+    store.close();
+
+    const result = runCli(["runs", "list", "--json"], cwd);
+
+    assert.equal(result.status, 0);
+    assert.deepEqual(JSON.parse(result.stdout), [
+      {
+        ...entry("run-live", 3),
+        status: "queued",
+        failureCode: null,
+        prUrl: null,
+        finishedAt: null,
+        pid: process.pid,
+        interrupted: false,
+      },
+      {
+        ...entry("run-crashed", 2),
+        status: "implementing",
+        failureCode: null,
+        prUrl: null,
+        finishedAt: null,
+        pid: deadPid,
+        interrupted: true,
+      },
+      {
+        ...entry("run-finished", 1),
+        status: "failed",
+        failureCode: "verify_failed",
+        prUrl: null,
+        finishedAt: "2026-04-25T00:05:00.000Z",
+        pid: deadPid,
+        interrupted: false,
+      },
+    ]);
+
+    const text = runCli(["runs", "list"], cwd);
+    assert.match(text.stdout, /run-crashed\s+GH-2\s+implementing interrupted\s/);
+    assert.match(text.stdout, /run-live\s+GH-3\s+queued\s/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
+test("runs list --json in a repository without runs prints an empty list", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-empty-runs-json-"));
+
+  try {
+    const result = runCli(["runs", "list", "--json"], cwd);
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, "[]\n");
+    assert.equal(existsSync(join(cwd, ".codex-cage")), false);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
+
 test("runs list in a repository without runs creates no state and prints no warnings", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-empty-runs-"));
 

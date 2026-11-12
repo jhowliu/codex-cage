@@ -118,7 +118,7 @@ Use `codex-cage --help` or `codex-cage <command> --help` for the current CLI hel
 | `codex-cage doctor`             | Diagnose local tools, credentials, workflow, labels, and Actions secrets; `--probe` also test-calls each agent. |
 | `codex-cage check <issue-url>`  | Check whether an issue is ready to run: its `## Blocked by` issues are closed and the config is valid.          |
 | `codex-cage run <issue-url>`    | Run the full issue-to-PR workflow for a GitHub or Linear issue.                                                 |
-| `codex-cage runs list`          | List locally recorded runs from `.codex-cage/codex-cage.sqlite`.                                                |
+| `codex-cage runs list`          | List locally recorded runs from `.codex-cage/codex-cage.sqlite`; `--json` for tools.                            |
 | `codex-cage runs show <run-id>` | Show run metadata, phase status, and artifact paths.                                                            |
 | `codex-cage cleanup`            | Remove stale stopped Docker resources managed by Codex Cage.                                                    |
 | `codex-cage cleanup --all`      | Remove all managed Docker resources, including active ones.                                                     |
@@ -180,6 +180,8 @@ codex-cage runs show <run-id>
 ```
 
 Run metadata is stored in `.codex-cage/codex-cage.sqlite` (SQLite in WAL mode, so several runs in the same repository can write at once and `runs list` reads without blocking them). Large artifacts such as logs, patches, issue payloads, prompt context, and summaries are stored under `.codex-cage/runs/<run-id>` rather than inside SQLite.
+
+Tools that track runs, such as an editor or terminal panel, read `codex-cage runs list --json`. It prints every run newest first with its `issueUrl`, `status`, `failureCode`, `prUrl`, and `interrupted`. `interrupted` is `true` when the run never finished and its process is gone, such as after a crash or a closed terminal. `runs list` shows such a run as `<status> interrupted`.
 
 ## Design Architecture
 

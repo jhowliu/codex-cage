@@ -81,6 +81,8 @@ export type CreateRunInput = {
   baseBranch: string;
   branch: string;
   startedAt?: Date;
+  /** The process that executes the run. Defaults to the calling process. */
+  pid?: number;
 };
 
 export type RunRecord = {
@@ -95,6 +97,8 @@ export type RunRecord = {
   prUrl: string | null;
   startedAt: string;
   finishedAt: string | null;
+  /** The process that executes the run, or null for a run recorded by an earlier version. */
+  pid: number | null;
 };
 
 export type PhaseRecord = {
@@ -226,6 +230,7 @@ function migrate(database: DatabaseSync): void {
 
   try {
     database.exec(schemaSql);
+    applyMigrations(database);
     database.exec("COMMIT;");
   } catch (error) {
     if (database.isTransaction) {
@@ -233,6 +238,25 @@ function migrate(database: DatabaseSync): void {
     }
 
     throw error;
+  }
+}
+
+// Changes to databases created by earlier versions, each applied once, in order.
+const migrations = [
+  { version: 2, sql: "ALTER TABLE runs ADD COLUMN pid INTEGER;" },
+] as const;
+
+function applyMigrations(database: DatabaseSync): void {
+  const applied = database.prepare("SELECT 1 FROM schema_migrations WHERE version = ?");
+  const record = database.prepare(
+    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+  );
+
+  for (const migration of migrations) {
+    if (applied.get(migration.version) === undefined) {
+      database.exec(migration.sql);
+      record.run(migration.version, new Date().toISOString());
+    }
   }
 }
 
@@ -309,9 +333,10 @@ export class RunStore {
           base_branch,
           branch,
           status,
-          started_at
+          started_at,
+          pid
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       [
         input.id,
@@ -322,6 +347,7 @@ export class RunStore {
         input.branch,
         "queued",
         startedAt,
+        input.pid ?? process.pid,
       ],
     );
 
@@ -497,6 +523,28 @@ export class RunStore {
   }
 }
 
+/**
+ * A run is interrupted when it never finished and the process that ran it is
+ * gone, for example after a crash or a closed terminal. A run recorded without
+ * a pid is never reported as interrupted, because there is nothing to check.
+ */
+export function isRunInterrupted(
+  run: RunRecord,
+  isAlive: (pid: number) => boolean = isProcessAlive,
+): boolean {
+  return run.finishedAt === null && run.pid !== null && !isAlive(run.pid);
+}
+
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to another user.
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+}
+
 function toNumber(value: number | bigint): number {
   return typeof value === "bigint" ? Number(value) : value;
 }
@@ -524,7 +572,24 @@ function rowToRunRecord(row: Row): RunRecord {
     prUrl: readNullableString(row, "pr_url"),
     startedAt: readString(row, "started_at"),
     finishedAt: readNullableString(row, "finished_at"),
+    pid: readPid(row),
   };
+}
+
+// A read-only store never migrates, so a database from before pids were
+// recorded has no pid column at all.
+function readPid(row: Row): number | null {
+  const value = row["pid"];
+
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  if (typeof value !== "number") {
+    throw new Error("Expected pid to be a number or null.");
+  }
+
+  return value;
 }
 
 function rowToPhaseRecord(row: Row): PhaseRecord {
