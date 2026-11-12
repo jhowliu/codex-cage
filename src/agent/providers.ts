@@ -47,7 +47,7 @@ export type AgentCommandInput =
       outputSchema: Record<string, unknown>;
     };
 
-const codexOutputSchemaPath = "/tmp/codex-cage-review-output-schema.json";
+const codexOutputSchemaPath = "/tmp/agent-cage-review-output-schema.json";
 
 export function agentShellCommand(
   agent: AgentAssignment,

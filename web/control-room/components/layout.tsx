@@ -30,7 +30,7 @@ export function AppShell({
           <div className="grid size-[38px] place-items-center rounded-[11px] border border-[#bad0ff] bg-blue-soft text-blue">
             <Icon name="grid" size={19} />
           </div>
-          <span className="max-md:hidden">Codex Cage</span>
+          <span className="max-md:hidden">Agent Cage</span>
         </div>
         <p className="mb-[15px] mt-[50px] px-2.5 text-[11px] font-semibold tracking-[0.02em] text-[#7b8aa5] max-md:hidden">
           Local control room
@@ -153,8 +153,8 @@ function AuthStatusCard({
       </div>
       <p className="m-0 text-[9px] leading-[1.45] text-soft-muted">{status.message}</p>
       <span className="font-mono text-[8px] text-soft-muted">
-        {status.source === "codex-cage-env"
-          ? "Source: .codex-cage.env"
+        {status.source === "agent-cage-env"
+          ? "Source: .agent-cage.env"
           : "Source: not configured"}
       </span>
       <button

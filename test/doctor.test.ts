@@ -7,11 +7,11 @@ import { doctorProject, type DoctorCommandRunner } from "../src/doctor.js";
 import { GENERATED_WORKFLOW_MARKER } from "../src/setup.js";
 
 // Doctor reads the machine-wide credential file; isolate it per test process.
-const configHome = await mkdtemp(join(tmpdir(), "codex-cage-config-"));
+const configHome = await mkdtemp(join(tmpdir(), "agent-cage-config-"));
 process.env.XDG_CONFIG_HOME = configHome;
-const globalEnvPath = join(configHome, "codex-cage", "env");
+const globalEnvPath = join(configHome, "agent-cage", "env");
 // Keep the developer's real Codex login out of these tests.
-process.env.CODEX_HOME = await mkdtemp(join(tmpdir(), "codex-cage-codex-home-"));
+process.env.CODEX_HOME = await mkdtemp(join(tmpdir(), "agent-cage-codex-home-"));
 
 const quietRunner: DoctorCommandRunner = async () => ({
   exitCode: 0,
@@ -26,7 +26,7 @@ const signedOutRunner: DoctorCommandRunner = async (command, args, cwd) =>
     : quietRunner(command, args, cwd);
 
 test("doctor reports missing configuration", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
   try {
     const result = await doctorProject(cwd);
     assert.equal(result.healthy, false);
@@ -37,12 +37,12 @@ test("doctor reports missing configuration", async () => {
 });
 
 test("doctor validates configured Actions resources", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
   const names = [
-    "codex-cage:run",
-    "codex-cage:in-progress",
-    "codex-cage:ready-for-review",
-    "codex-cage:blocked",
+    "agent-cage:run",
+    "agent-cage:in-progress",
+    "agent-cage:ready-for-review",
+    "agent-cage:blocked",
   ];
   const runner: DoctorCommandRunner = async (command, args) => {
     if (command === "gh" && args[0] === "secret") {
@@ -50,7 +50,7 @@ test("doctor validates configured Actions resources", async () => {
         exitCode: 0,
         stdout: JSON.stringify([
           { name: "OPENAI_API_KEY" },
-          { name: "CODEX_CAGE_GITHUB_TOKEN" },
+          { name: "AGENT_CAGE_GITHUB_TOKEN" },
         ]),
         stderr: "",
       };
@@ -67,12 +67,12 @@ test("doctor validates configured Actions resources", async () => {
   try {
     await mkdir(join(cwd, ".github", "workflows"), { recursive: true });
     await writeFile(
-      join(cwd, ".codex-cage.yml"),
-      "verify:\n  - npm test\nactions:\n  enabled: true\n  codex_cage_version: 0.1.0\n",
+      join(cwd, ".agent-cage.yml"),
+      "verify:\n  - npm test\nactions:\n  enabled: true\n  agent_cage_version: 0.1.0\n",
       "utf8",
     );
     await writeFile(
-      join(cwd, ".github", "workflows", "codex-cage.yml"),
+      join(cwd, ".github", "workflows", "agent-cage.yml"),
       `${GENERATED_WORKFLOW_MARKER}name: test\n`,
       "utf8",
     );
@@ -87,7 +87,7 @@ test("doctor validates configured Actions resources", async () => {
 });
 
 test("doctor checks local requirements without requiring Actions", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
   const runner: DoctorCommandRunner = async (command) => ({
     exitCode: command === "docker" ? 1 : 0,
     stdout: "true",
@@ -95,7 +95,7 @@ test("doctor checks local requirements without requiring Actions", async () => {
   });
   try {
     await writeFile(
-      join(cwd, ".codex-cage.yml"),
+      join(cwd, ".agent-cage.yml"),
       "verify:\n  - npm test\nactions:\n  enabled: false\n",
       "utf8",
     );
@@ -118,10 +118,10 @@ test("doctor checks local requirements without requiring Actions", async () => {
 });
 
 test("doctor checks Claude credentials when Claude implements", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
   try {
     await writeFile(
-      join(cwd, ".codex-cage.yml"),
+      join(cwd, ".agent-cage.yml"),
       "verify:\n  - npm test\nagent:\n  implement:\n    provider: claude\n",
       "utf8",
     );
@@ -132,7 +132,7 @@ test("doctor checks Claude credentials when Claude implements", async () => {
       ),
     );
 
-    await mkdir(join(configHome, "codex-cage"), { recursive: true });
+    await mkdir(join(configHome, "agent-cage"), { recursive: true });
     await writeFile(globalEnvPath, "CLAUDE_CODE_OAUTH_TOKEN=claude-token\n", {
       encoding: "utf8",
       mode: 0o600,
@@ -150,10 +150,10 @@ test("doctor checks Claude credentials when Claude implements", async () => {
 });
 
 test("doctor warns about GitHub credentials and loose permissions in the global file", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
   try {
-    await writeFile(join(cwd, ".codex-cage.yml"), "verify:\n  - npm test\n", "utf8");
-    await mkdir(join(configHome, "codex-cage"), { recursive: true });
+    await writeFile(join(cwd, ".agent-cage.yml"), "verify:\n  - npm test\n", "utf8");
+    await mkdir(join(configHome, "agent-cage"), { recursive: true });
     await writeFile(globalEnvPath, "GITHUB_TOKEN=github-token\n", {
       encoding: "utf8",
       mode: 0o644,
@@ -179,7 +179,7 @@ test("doctor warns about GitHub credentials and loose permissions in the global 
 });
 
 test("doctor reports which gh account local runs use", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
   const tokenCalls: (readonly string[])[] = [];
   const runner: DoctorCommandRunner = async (command, args, commandCwd) => {
     if (command === "gh" && args[0] === "auth" && args[1] === "token") {
@@ -195,11 +195,11 @@ test("doctor reports which gh account local runs use", async () => {
       (check) => check.name === "github-auth",
     );
   try {
-    await writeFile(join(cwd, ".codex-cage.yml"), "verify:\n  - npm test\n", "utf8");
+    await writeFile(join(cwd, ".agent-cage.yml"), "verify:\n  - npm test\n", "utf8");
 
     await writeFile(
-      join(cwd, ".codex-cage.env"),
-      "CODEX_CAGE_GH_USER=work-account\n",
+      join(cwd, ".agent-cage.env"),
+      "AGENT_CAGE_GH_USER=work-account\n",
       "utf8",
     );
     const pinned = await githubAuth();
@@ -207,12 +207,12 @@ test("doctor reports which gh account local runs use", async () => {
     assert.match(pinned?.message ?? "", /gh account work-account/);
     assert.ok(tokenCalls.at(-1)?.includes("--user"));
 
-    await writeFile(join(cwd, ".codex-cage.env"), "CODEX_CAGE_GH_USER=gone\n", "utf8");
+    await writeFile(join(cwd, ".agent-cage.env"), "AGENT_CAGE_GH_USER=gone\n", "utf8");
     const stale = await githubAuth();
     assert.equal(stale?.status, "warning");
     assert.match(stale?.message ?? "", /not signed in as gone/);
 
-    await writeFile(join(cwd, ".codex-cage.env"), "GITHUB_TOKEN=repo-token\n", "utf8");
+    await writeFile(join(cwd, ".agent-cage.env"), "GITHUB_TOKEN=repo-token\n", "utf8");
     const calls = tokenCalls.length;
     assert.equal((await githubAuth())?.status, "pass");
     assert.equal(tokenCalls.length, calls);
@@ -222,9 +222,9 @@ test("doctor reports which gh account local runs use", async () => {
 });
 
 async function probeProject(config: string): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-doctor-"));
-  await writeFile(join(cwd, ".codex-cage.yml"), config, "utf8");
-  await mkdir(join(configHome, "codex-cage"), { recursive: true });
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-doctor-"));
+  await writeFile(join(cwd, ".agent-cage.yml"), config, "utf8");
+  await mkdir(join(configHome, "agent-cage"), { recursive: true });
   await writeFile(
     globalEnvPath,
     "CLAUDE_CODE_OAUTH_TOKEN=claude-secret\nOPENAI_API_KEY=sk-secret\n",
@@ -252,7 +252,7 @@ function probeRunner(
 }
 
 const twoAgentConfig =
-  "verify:\n  - npm test\nruntime:\n  image: codex-cage/base:local\nagent:\n  implement:\n    provider: claude\n  review:\n    provider: codex\n    model: gpt-6.1-sol\n";
+  "verify:\n  - npm test\nruntime:\n  image: agent-cage/base:local\nagent:\n  implement:\n    provider: claude\n  review:\n    provider: codex\n    model: gpt-6.1-sol\n";
 
 test("doctor --probe runs each agent once in the runtime image with its own credentials", async () => {
   const cwd = await probeProject(twoAgentConfig);
@@ -276,7 +276,7 @@ test("doctor --probe runs each agent once in the runtime image with its own cred
     );
     assert.equal(calls.length, 2);
     const [claudeCall, codexCall] = calls;
-    assert.ok(claudeCall?.args.includes("codex-cage/base:local"));
+    assert.ok(claudeCall?.args.includes("agent-cage/base:local"));
     assert.match(
       claudeCall?.args.at(-1) ?? "",
       /claude -p .*'--model' 'claude-opus-5-5'/,

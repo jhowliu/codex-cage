@@ -33,31 +33,31 @@ function gitOrigin(originUrl: string | null): GitRemoteReader {
 }
 
 test("parseGithubRepo normalizes owner/name strings", () => {
-  assert.deepEqual(parseGithubRepo("jhowliu/codex-cage"), {
+  assert.deepEqual(parseGithubRepo("jhowliu/agent-cage"), {
     owner: "jhowliu",
-    name: "codex-cage",
-    fullName: "jhowliu/codex-cage",
+    name: "agent-cage",
+    fullName: "jhowliu/agent-cage",
   });
 });
 
 test("parseGithubRepo normalizes GitHub HTTPS remotes", () => {
   assert.equal(
-    parseGithubRepo("https://github.com/jhowliu/codex-cage.git").fullName,
-    "jhowliu/codex-cage",
+    parseGithubRepo("https://github.com/jhowliu/agent-cage.git").fullName,
+    "jhowliu/agent-cage",
   );
 });
 
 test("parseGithubRepo normalizes GitHub SSH remotes", () => {
   assert.equal(
-    parseGithubRepo("git@github.com:jhowliu/codex-cage.git").fullName,
-    "jhowliu/codex-cage",
+    parseGithubRepo("git@github.com:jhowliu/agent-cage.git").fullName,
+    "jhowliu/agent-cage",
   );
 });
 
 test("resolveTargetRepo prefers explicit repo", async () => {
   const result = await resolveTargetRepo({
     explicitRepo: "jhowliu/override",
-    issue: issueContext("jhowliu/codex-cage"),
+    issue: issueContext("jhowliu/agent-cage"),
     git: gitOrigin("https://github.com/jhowliu/local.git"),
   });
 
@@ -67,19 +67,19 @@ test("resolveTargetRepo prefers explicit repo", async () => {
 
 test("resolveTargetRepo uses GitHub issue inferred repo", async () => {
   const result = await resolveTargetRepo({
-    issue: issueContext("jhowliu/codex-cage"),
-    git: gitOrigin("https://github.com/jhowliu/codex-cage.git"),
+    issue: issueContext("jhowliu/agent-cage"),
+    git: gitOrigin("https://github.com/jhowliu/agent-cage.git"),
   });
 
   assert.equal(result.source, "issue");
-  assert.equal(result.repo.fullName, "jhowliu/codex-cage");
+  assert.equal(result.repo.fullName, "jhowliu/agent-cage");
 });
 
 test("resolveTargetRepo fails on GitHub issue and cwd origin mismatch", async () => {
   await assert.rejects(
     () =>
       resolveTargetRepo({
-        issue: issueContext("jhowliu/codex-cage"),
+        issue: issueContext("jhowliu/agent-cage"),
         git: gitOrigin("https://github.com/jhowliu/other.git"),
       }),
     /does not match current git origin/,
@@ -89,11 +89,11 @@ test("resolveTargetRepo fails on GitHub issue and cwd origin mismatch", async ()
 test("resolveTargetRepo uses cwd origin for Linear issue", async () => {
   const result = await resolveTargetRepo({
     issue: issueContext(null),
-    git: gitOrigin("git@github.com:jhowliu/codex-cage.git"),
+    git: gitOrigin("git@github.com:jhowliu/agent-cage.git"),
   });
 
   assert.equal(result.source, "cwd");
-  assert.equal(result.repo.fullName, "jhowliu/codex-cage");
+  assert.equal(result.repo.fullName, "jhowliu/agent-cage");
 });
 
 test("resolveTargetRepo fails when no repo source exists", async () => {
@@ -109,20 +109,20 @@ test("resolveTargetRepo fails when no repo source exists", async () => {
 
 test("createAuthenticatedRepo validates token but returns tokenless HTTPS clone URL", () => {
   const authenticatedRepo = createAuthenticatedRepo(
-    parseGithubRepo("jhowliu/codex-cage"),
+    parseGithubRepo("jhowliu/agent-cage"),
     "ghp_secret",
   );
 
-  assert.equal(authenticatedRepo.cloneUrl, "https://github.com/jhowliu/codex-cage.git");
+  assert.equal(authenticatedRepo.cloneUrl, "https://github.com/jhowliu/agent-cage.git");
   assert.equal(
     authenticatedRepo.redactedCloneUrl,
-    "https://github.com/jhowliu/codex-cage.git",
+    "https://github.com/jhowliu/agent-cage.git",
   );
 });
 
 test("createAuthenticatedRepo requires GITHUB_TOKEN", () => {
   assert.throws(
-    () => createAuthenticatedRepo(parseGithubRepo("jhowliu/codex-cage"), ""),
+    () => createAuthenticatedRepo(parseGithubRepo("jhowliu/agent-cage"), ""),
     /GITHUB_TOKEN is required/,
   );
 });

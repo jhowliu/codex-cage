@@ -59,15 +59,15 @@ function createFetchMock(responses: MockResponse[]): {
 }
 
 test("parseIssueUrl parses GitHub issue URLs and infers repo", () => {
-  const parsed = parseIssueUrl("https://github.com/jhowliu/codex-cage/issues/42");
+  const parsed = parseIssueUrl("https://github.com/jhowliu/agent-cage/issues/42");
 
   assert.deepEqual(parsed, {
     source: "github",
-    url: "https://github.com/jhowliu/codex-cage/issues/42",
+    url: "https://github.com/jhowliu/agent-cage/issues/42",
     owner: "jhowliu",
-    repo: "codex-cage",
+    repo: "agent-cage",
     number: 42,
-    inferredRepo: "jhowliu/codex-cage",
+    inferredRepo: "jhowliu/agent-cage",
   });
 });
 
@@ -92,11 +92,11 @@ test("parseIssueUrl rejects unsupported issue URLs", () => {
 test("fetchGithubIssueContext fetches issue context and selected human comments", async () => {
   const issue: ParsedGithubIssueUrl = {
     source: "github",
-    url: "https://github.com/jhowliu/codex-cage/issues/4",
+    url: "https://github.com/jhowliu/agent-cage/issues/4",
     owner: "jhowliu",
-    repo: "codex-cage",
+    repo: "agent-cage",
     number: 4,
-    inferredRepo: "jhowliu/codex-cage",
+    inferredRepo: "jhowliu/agent-cage",
   };
   const { fetch, calls } = createFetchMock([
     jsonResponse({
@@ -135,7 +135,7 @@ test("fetchGithubIssueContext fetches issue context and selected human comments"
 
   assert.equal(context.source, "github");
   assert.equal(context.identifier, "#4");
-  assert.equal(context.inferredRepo, "jhowliu/codex-cage");
+  assert.equal(context.inferredRepo, "jhowliu/agent-cage");
   assert.equal(context.title, "Persist run metadata");
   assert.deepEqual(context.comments, [
     {
@@ -237,7 +237,7 @@ test("fetchIssueContext dispatches based on URL provider", async () => {
   ]);
 
   const context = await fetchIssueContext(
-    "https://github.com/jhowliu/codex-cage/issues/5",
+    "https://github.com/jhowliu/agent-cage/issues/5",
     { fetch },
   );
 
@@ -250,7 +250,7 @@ test("fetchIssueContext reports HTTP failures", async () => {
 
   await assert.rejects(
     () =>
-      fetchIssueContext("https://github.com/jhowliu/codex-cage/issues/5", {
+      fetchIssueContext("https://github.com/jhowliu/agent-cage/issues/5", {
         fetch,
       }),
     /Request failed: 404 Not Found/,

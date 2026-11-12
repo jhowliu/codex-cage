@@ -17,7 +17,7 @@ export function buildImplementationPrompt(input: {
 Rules:
 - Work only in this repository.
 - Do not commit, push, create pull requests, or write secrets.
-- Run only commands needed to implement the issue; Codex Cage will run verification separately.
+- Run only commands needed to implement the issue; Agent Cage will run verification separately.
 - ${agentInstructionFilesRule(input.context.agents.implement.provider)}
 - If the issue lacks enough detail to implement safely, stop and explain the blocker.
 

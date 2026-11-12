@@ -6,7 +6,7 @@ import test from "node:test";
 import { checkIssue, type CheckIssueDependencies } from "../src/check.js";
 import type { IssueContext } from "../src/issue.js";
 
-const issueUrl = "https://github.com/jhowliu/codex-cage/issues/200";
+const issueUrl = "https://github.com/jhowliu/agent-cage/issues/200";
 
 function dependencies(body: string, fetched: string[] = []): CheckIssueDependencies {
   const issue: IssueContext = {
@@ -16,7 +16,7 @@ function dependencies(body: string, fetched: string[] = []): CheckIssueDependenc
     title: "Add multiply()",
     body,
     comments: [],
-    inferredRepo: "jhowliu/codex-cage",
+    inferredRepo: "jhowliu/agent-cage",
   };
 
   return {
@@ -31,9 +31,9 @@ function dependencies(body: string, fetched: string[] = []): CheckIssueDependenc
 }
 
 async function withProject(config: string | null, body: (cwd: string) => Promise<void>) {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-check-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-check-"));
   try {
-    if (config !== null) await writeFile(join(cwd, ".codex-cage.yml"), config, "utf8");
+    if (config !== null) await writeFile(join(cwd, ".agent-cage.yml"), config, "utf8");
     await body(cwd);
   } finally {
     await rm(cwd, { recursive: true, force: true });

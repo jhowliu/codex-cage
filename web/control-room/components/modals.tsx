@@ -362,7 +362,7 @@ function RepositoryStep({
         <span>
           Execution settings come from this repository&apos;s{" "}
           <code className="rounded-md bg-[#f0f5ff] px-2 py-1 font-mono text-[12px] text-[#58739d] max-sm:text-[10px]">
-            .codex-cage.yml
+            .agent-cage.yml
           </code>
           .
         </span>

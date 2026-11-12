@@ -1,4 +1,4 @@
-import { loadCodexCageConfigFile } from "./config-file.js";
+import { loadAgentCageConfigFile } from "./config-file.js";
 import { prepareRunCredentials, readRunEnv } from "./credentials.js";
 import { ghTokenLookup, type GithubTokenLookup } from "./github-auth.js";
 import { fetchIssueContext } from "./issue.js";
@@ -32,7 +32,7 @@ export type CheckIssueDependencies = {
 };
 
 /**
- * Checks whether an issue is ready to hand to `codex-cage run`: the repository
+ * Checks whether an issue is ready to hand to `agent-cage run`: the repository
  * config must be valid and every issue under "Blocked by" must be closed.
  * Missing template sections only warn. `run` does not repeat this check, so
  * callers such as a delegating agent run it first.
@@ -42,20 +42,20 @@ export async function checkIssue(
   issueUrl: string,
   dependencies: CheckIssueDependencies = {},
 ): Promise<IssueCheckResult> {
-  const configFile = await loadCodexCageConfigFile(cwd);
+  const configFile = await loadAgentCageConfigFile(cwd);
 
   switch (configFile.status) {
     case "missing":
       return notReady(issueUrl, {
         level: "error",
         code: "missing_config",
-        message: ".codex-cage.yml was not found. Run `codex-cage setup` first.",
+        message: ".agent-cage.yml was not found. Run `agent-cage setup` first.",
       });
     case "invalid":
       return notReady(issueUrl, {
         level: "error",
         code: "invalid_config",
-        message: `.codex-cage.yml is invalid: ${configFile.errors
+        message: `.agent-cage.yml is invalid: ${configFile.errors
           .map((error) => error.message)
           .join("; ")}`,
       });

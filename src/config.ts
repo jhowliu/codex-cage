@@ -36,13 +36,13 @@ const actionsRuntimeSchema = z.object({
 });
 
 const defaultActionsLabels = {
-  run: "codex-cage:run",
-  in_progress: "codex-cage:in-progress",
-  ready: "codex-cage:ready-for-review",
-  blocked: "codex-cage:blocked",
+  run: "agent-cage:run",
+  in_progress: "agent-cage:in-progress",
+  ready: "agent-cage:ready-for-review",
+  blocked: "agent-cage:blocked",
 } as const;
 
-export const codexCageConfigSchema = z
+export const agentCageConfigSchema = z
   .object({
     setup: z.array(z.string()).default([]),
     verify: z.array(z.string()).min(1),
@@ -92,13 +92,13 @@ export const codexCageConfigSchema = z
     git: z
       .object({
         base: z.string().default("main"),
-        author_name: z.string().default("Codex Cage"),
-        author_email: z.string().email().default("codex-cage@users.noreply.github.com"),
+        author_name: z.string().default("Agent Cage"),
+        author_email: z.string().email().default("agent-cage@users.noreply.github.com"),
       })
       .default(() => ({
         base: "main",
-        author_name: "Codex Cage",
-        author_email: "codex-cage@users.noreply.github.com",
+        author_name: "Agent Cage",
+        author_email: "agent-cage@users.noreply.github.com",
       })),
     issue: z
       .object({
@@ -114,8 +114,8 @@ export const codexCageConfigSchema = z
     actions: z
       .object({
         enabled: z.boolean().default(false),
-        workflow: z.string().min(1).default(".github/workflows/codex-cage.yml"),
-        codex_cage_version: z.string().min(1).nullable().default(null),
+        workflow: z.string().min(1).default(".github/workflows/agent-cage.yml"),
+        agent_cage_version: z.string().min(1).nullable().default(null),
         runner: z.string().min(1).default("ubuntu-latest"),
         timeout_minutes: z.number().int().positive().default(90),
         container: actionsRuntimeSchema.nullable().default(null),
@@ -131,8 +131,8 @@ export const codexCageConfigSchema = z
       })
       .default(() => ({
         enabled: false,
-        workflow: ".github/workflows/codex-cage.yml",
-        codex_cage_version: null,
+        workflow: ".github/workflows/agent-cage.yml",
+        agent_cage_version: null,
         runner: "ubuntu-latest",
         timeout_minutes: 90,
         container: null,
@@ -142,20 +142,20 @@ export const codexCageConfigSchema = z
   })
   .passthrough()
   .superRefine((config, context) => {
-    if (config.actions.enabled && config.actions.codex_cage_version === null) {
+    if (config.actions.enabled && config.actions.agent_cage_version === null) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["actions", "codex_cage_version"],
+        path: ["actions", "agent_cage_version"],
         message: "must be set when GitHub Actions is enabled",
       });
     }
   });
 
-export type CodexCageConfig = z.infer<typeof codexCageConfigSchema>;
+export type AgentCageConfig = z.infer<typeof agentCageConfigSchema>;
 
 export type ExecutionMode = "docker" | "direct";
 
-export const CODEX_CAGE_EXECUTION_ENV = "CODEX_CAGE_EXECUTION";
+export const AGENT_CAGE_EXECUTION_ENV = "AGENT_CAGE_EXECUTION";
 
 const executionModes = new Set<ExecutionMode>(["docker", "direct"]);
 
@@ -172,11 +172,11 @@ export function resolveExecutionMode(input: {
   env?: Record<string, string | undefined> | undefined;
   config?: { execution?: ExecutionMode | undefined } | undefined;
 }): ExecutionMode {
-  const fromEnv = input.env?.[CODEX_CAGE_EXECUTION_ENV];
+  const fromEnv = input.env?.[AGENT_CAGE_EXECUTION_ENV];
   if (fromEnv !== undefined && fromEnv !== "") {
     if (!isExecutionMode(fromEnv)) {
       throw new Error(
-        `${CODEX_CAGE_EXECUTION_ENV} must be "docker" or "direct", got "${fromEnv}".`,
+        `${AGENT_CAGE_EXECUTION_ENV} must be "docker" or "direct", got "${fromEnv}".`,
       );
     }
     return fromEnv;
@@ -186,7 +186,7 @@ export function resolveExecutionMode(input: {
 }
 
 export type ConfigParseResult = {
-  config: CodexCageConfig;
+  config: AgentCageConfig;
   warnings: string[];
 };
 
@@ -205,11 +205,11 @@ const knownTopLevelKeys = new Set([
   "actions",
 ]);
 
-export function parseCodexCageConfig(input: unknown): ConfigParseResult {
+export function parseAgentCageConfig(input: unknown): ConfigParseResult {
   const warnings = collectUnknownTopLevelKeyWarnings(input);
 
   return {
-    config: codexCageConfigSchema.parse(input),
+    config: agentCageConfigSchema.parse(input),
     warnings,
   };
 }

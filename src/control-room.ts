@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { loadCodexCageConfigFile } from "./config-file.js";
+import { loadAgentCageConfigFile } from "./config-file.js";
 import { buildStageResult } from "./control-room-results.js";
 import {
   readGithubAuthStatus,
@@ -205,7 +205,7 @@ type ControlRoomState = z.infer<typeof controlRoomStateSchema>;
 type ChangeListener = () => void;
 
 export async function openControlRoomStore(cwd: string): Promise<ControlRoomStore> {
-  const stateDirectory = join(cwd, ".codex-cage");
+  const stateDirectory = join(cwd, ".agent-cage");
   await mkdir(stateDirectory, { recursive: true });
   const path = join(stateDirectory, controlRoomStateFileName);
   let state: ControlRoomState;
@@ -439,7 +439,7 @@ export class ControlRoomStore {
     }
     const run = this.getRun(runId);
     const repository = this.getRepository(run.repositoryId);
-    return join(repository.path, ".codex-cage", "runs", runId, name);
+    return join(repository.path, ".agent-cage", "runs", runId, name);
   }
 
   private getMutableRun(id: string): ControlRunRecord {
@@ -852,7 +852,7 @@ class LocalExecutionProvider implements ExecutionProvider {
 
 async function launchLocalRunner(request: LocalRunRequest): Promise<LocalRunnerHandle> {
   const entrypoint = fileURLToPath(new URL("./cli.js", import.meta.url));
-  const runDirectory = join(request.repositoryPath, ".codex-cage", "runs", request.runId);
+  const runDirectory = join(request.repositoryPath, ".agent-cage", "runs", request.runId);
   await mkdir(runDirectory, { recursive: true });
   const eventPath = join(runDirectory, runEventJournalFileName);
   const resultPath = join(runDirectory, "result.json");
@@ -893,7 +893,7 @@ async function inspectRepository(input: {
   createdAt: string;
   updatedAt: string;
 }): Promise<RepositoryRecord> {
-  const config = await loadCodexCageConfigFile(input.path);
+  const config = await loadAgentCageConfigFile(input.path);
   const origin = await defaultGitRemoteReader.getOriginUrl(input.path);
   let fullName: string | null = null;
   if (origin !== null) {
@@ -910,7 +910,7 @@ async function inspectRepository(input: {
       name: basename(input.path),
       fullName,
       status: "setup_required",
-      message: "Add .codex-cage.yml with at least one verify command.",
+      message: "Add .agent-cage.yml with at least one verify command.",
       warnings: [],
     };
   }

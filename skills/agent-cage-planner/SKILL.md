@@ -1,13 +1,13 @@
 ---
-name: codex-cage-delegate
-description: Delegate work to codex-cage runs. Split a feature into GitHub issues, check each one, start a run per ready issue, and report its PR or failure. Use when the user wants work handed to codex-cage, a feature split into delegatable issues, or existing issues run with codex-cage.
+name: agent-cage-planner
+description: Delegate work to agent-cage runs. Split a feature into GitHub issues, check each one, start a run per ready issue, and report its PR or failure. Use when the user wants work handed to agent-cage, a feature split into delegatable issues, or existing issues run with agent-cage.
 ---
 
-# codex-cage delegate
+# agent-cage planner
 
-You are the **planner**. You turn the user's request into GitHub issues that codex-cage can implement without asking anyone, start one run per ready issue, and report each run's PR or failure. codex-cage implements, verifies, reviews and opens the PR inside its Docker sandbox. Your edits go into issues, not into the target repository.
+You are the **planner**. You turn the user's request into GitHub issues that agent-cage can implement without asking anyone, start one run per ready issue, and report each run's PR or failure. agent-cage implements, verifies, reviews and opens the PR inside its Docker sandbox. Your edits go into issues, not into the target repository.
 
-Work from the target repository's checkout. `codex-cage check` and `codex-cage run` read `.codex-cage.yml` from the current directory and keep run artifacts under `.codex-cage/runs/`.
+Work from the target repository's checkout. `agent-cage check` and `agent-cage run` read `.agent-cage.yml` from the current directory and keep run artifacts under `.agent-cage/runs/`.
 
 ## 1. Size the request
 
@@ -55,7 +55,7 @@ Done when every task has an issue URL and you have shown the user the list.
 ## 3. Check each issue
 
 ```bash
-codex-cage check <issue-url> --json
+agent-cage check <issue-url> --json
 ```
 
 - `ready: true` with no warnings: start the run.
@@ -70,20 +70,20 @@ Done when every issue is started, waiting, or reported.
 Ready issues run in parallel, each as its own background command with its own result file. `<n>` is the issue number:
 
 ```bash
-mkdir -p .codex-cage/runs && rm -f .codex-cage/runs/delegate-<n>.json
-CODEX_CAGE_EXECUTION=docker codex-cage run <issue-url> --result-json .codex-cage/runs/delegate-<n>.json
+mkdir -p .agent-cage/runs && rm -f .agent-cage/runs/planner-<n>.json
+AGENT_CAGE_EXECUTION=docker agent-cage run <issue-url> --result-json .agent-cage/runs/planner-<n>.json
 ```
 
-`CODEX_CAGE_EXECUTION=docker` keeps the run in the Docker sandbox even when the config selects direct mode. Keep working with the user while the runs go.
+`AGENT_CAGE_EXECUTION=docker` keeps the run in the Docker sandbox even when the config selects direct mode. Keep working with the user while the runs go.
 
 ## 5. Wait and report
 
-When a run's command exits, read `.codex-cage/runs/delegate-<n>.json`:
+When a run's command exits, read `.agent-cage/runs/planner-<n>.json`:
 
 | Result              | Report                                                                                  |
 | ------------------- | --------------------------------------------------------------------------------------- |
 | `status: succeeded` | The `prUrl`. The user reviews and merges it.                                            |
-| `status: failed`    | The `failureCode` and `codex-cage runs show <runId>`.                                   |
+| `status: failed`    | The `failureCode` and `agent-cage runs show <runId>`.                                   |
 | No file             | The run crashed before writing its result. Report the last lines of the command output. |
 
 Rerun a failed issue only after changing what made it fail, such as the issue body, the config, or a split into smaller issues.

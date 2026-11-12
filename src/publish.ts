@@ -158,7 +158,7 @@ export function generateBranchName(input: {
     .replace(/^run-?/, "")
     .slice(0, 12);
 
-  return `codex-cage/${source}-${issueId}-run-${runId}`;
+  return `agent-cage/${source}-${issueId}-run-${runId}`;
 }
 
 export async function hasPublishableChanges(input: {
@@ -285,7 +285,7 @@ async function runWithTemporaryGitHubAskpass(
     return commandResultFromExeca(result);
   }
 
-  const tempDir = await mkdtemp(join(tmpdir(), "codex-cage-git-auth-"));
+  const tempDir = await mkdtemp(join(tmpdir(), "agent-cage-git-auth-"));
   const askpassPath = join(tempDir, "askpass.sh");
 
   try {

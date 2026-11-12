@@ -96,7 +96,7 @@ export function createAuthenticatedRepo(
 ): AuthenticatedRepo {
   if (githubToken === undefined || githubToken.trim() === "") {
     throw new Error(
-      "GITHUB_TOKEN is required for GitHub clone, push, issue, and pull request operations. Set it in .codex-cage.env or sign in with `gh auth login`.",
+      "GITHUB_TOKEN is required for GitHub clone, push, issue, and pull request operations. Set it in .agent-cage.env or sign in with `gh auth login`.",
     );
   }
 

@@ -12,12 +12,12 @@ import {
 function githubIssue(body: string): IssueContext {
   return {
     source: "github",
-    url: "https://github.com/jhowliu/codex-cage/issues/200",
+    url: "https://github.com/jhowliu/agent-cage/issues/200",
     identifier: "#200",
     title: "Task",
     body,
     comments: [],
-    inferredRepo: "jhowliu/codex-cage",
+    inferredRepo: "jhowliu/agent-cage",
   };
 }
 
@@ -58,13 +58,13 @@ test("parseMarkdownSections nests subsections and ignores headings in code fence
 
 test("parseBlockerReferences resolves URLs, owner/repo#N, and #N against the issue repo", () => {
   const parsed = parseBlockerReferences(
-    "- #105\n- jhowliu/herdr-issues#3\n- https://github.com/jhowliu/codex-cage/pull/128\n- #105 again",
-    "jhowliu/codex-cage",
+    "- #105\n- jhowliu/herdr-issues#3\n- https://github.com/jhowliu/agent-cage/pull/128\n- #105 again",
+    "jhowliu/agent-cage",
   );
 
   assert.deepEqual(
     parsed.references.map((r) => `${r.owner}/${r.repo}#${r.number}`).sort(),
-    ["jhowliu/codex-cage#105", "jhowliu/codex-cage#128", "jhowliu/herdr-issues#3"],
+    ["jhowliu/agent-cage#105", "jhowliu/agent-cage#128", "jhowliu/herdr-issues#3"],
   );
   assert.deepEqual(parsed.unresolvable, []);
   assert.deepEqual(
@@ -87,8 +87,8 @@ test("checkIssueReadiness fails on open blockers and passes once they are closed
     [["error", "blocked_by_open_issue"]],
   );
   assert.deepEqual(open.seen.sort(), [
-    "jhowliu/codex-cage#105",
-    "jhowliu/codex-cage#106",
+    "jhowliu/agent-cage#105",
+    "jhowliu/agent-cage#106",
   ]);
 
   const closed = states({ 105: "closed", 106: "closed" });

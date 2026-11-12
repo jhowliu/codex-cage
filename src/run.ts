@@ -6,9 +6,9 @@ import { codexHomePath } from "./agent/codex.js";
 import type { AgentAssignments } from "./agent/providers.js";
 import type { createComposeProject } from "./compose.js";
 import {
-  parseCodexCageConfig,
+  parseAgentCageConfig,
   resolveExecutionMode,
-  type CodexCageConfig,
+  type AgentCageConfig,
   type ExecutionMode,
 } from "./config.js";
 import { prepareRunCredentials, readRunEnv } from "./credentials.js";
@@ -29,13 +29,13 @@ import { openRunStore } from "./state.js";
 import type { createHostShellRunner, createHostWorkspace } from "./sandbox-execution.js";
 import {
   runWorkflow,
-  type RunCodexCageResult,
+  type RunAgentCageResult,
   type RunProgressEvent,
   type RuntimeContext,
   type ShellRunner,
 } from "./run-workflow.js";
 
-export type { RunCodexCageResult, RunEvent, RunEventSink, RunProgressEvent, ShellRunner };
+export type { RunAgentCageResult, RunEvent, RunEventSink, RunProgressEvent, ShellRunner };
 
 export type RunCommandOptions = {
   cwd?: string;
@@ -48,7 +48,7 @@ export type RunCommandOptions = {
   verbose?: boolean | undefined;
 };
 
-export type RunCodexCageDependencies = {
+export type RunAgentCageDependencies = {
   fetchIssueContext?: typeof fetchIssueContext;
   resolveTargetRepo?: typeof resolveTargetRepo;
   createAuthenticatedRepo?: typeof createAuthenticatedRepo;
@@ -71,16 +71,16 @@ export type RunCodexCageDependencies = {
   onProgress?: (event: RunProgressEvent) => void;
   onEvent?: RunEventSink;
   // Overrides mode resolution (env > config > docker). Tests pin this so they
-  // are not influenced by an ambient CODEX_CAGE_EXECUTION.
+  // are not influenced by an ambient AGENT_CAGE_EXECUTION.
   executionMode?: ExecutionMode;
 };
 
-const configPath = ".codex-cage.yml";
+const configPath = ".agent-cage.yml";
 
-export async function runCodexCage(
+export async function runAgentCage(
   options: RunCommandOptions,
-  dependencies: RunCodexCageDependencies = {},
-): Promise<RunCodexCageResult> {
+  dependencies: RunAgentCageDependencies = {},
+): Promise<RunAgentCageResult> {
   const cwd = options.cwd ?? process.cwd();
   const context = await prepareRuntimeContext(cwd, options, dependencies);
   const openStore = dependencies.openRunStore ?? openRunStore;
@@ -127,7 +127,7 @@ export async function runCodexCage(
 async function prepareRuntimeContext(
   cwd: string,
   options: RunCommandOptions,
-  dependencies: RunCodexCageDependencies,
+  dependencies: RunAgentCageDependencies,
 ): Promise<RuntimeContext> {
   const configResult = await readConfig(cwd);
   const readEnv = dependencies.readEnv ?? readRunEnv;
@@ -208,7 +208,7 @@ async function prepareRuntimeContext(
 }
 
 async function readConfig(cwd: string): Promise<{
-  config: CodexCageConfig;
+  config: AgentCageConfig;
   warnings: string[];
 }> {
   let content: string;
@@ -224,11 +224,11 @@ async function readConfig(cwd: string): Promise<{
   }
 
   try {
-    return parseCodexCageConfig(YAML.parse(content) as unknown);
+    return parseAgentCageConfig(YAML.parse(content) as unknown);
   } catch (error) {
     throw new RunFailureError(
       "invalid_config",
-      error instanceof Error ? error.message : "Invalid Codex Cage config.",
+      error instanceof Error ? error.message : "Invalid Agent Cage config.",
     );
   }
 }

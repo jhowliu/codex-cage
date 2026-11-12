@@ -82,7 +82,7 @@ export function composeProjectName(runId: string): string {
     throw new Error("Run id must contain at least one Compose-safe character.");
   }
 
-  return `codex-cage-${safeRunId}`;
+  return `agent-cage-${safeRunId}`;
 }
 
 export function composeBaseArgs(options: {
@@ -116,11 +116,11 @@ export function readyCommandRunArgs(input: ReadyCommandRunArgsInput): string[] {
     "run",
     "--rm",
     "--label",
-    "codex-cage.managed=true",
+    "agent-cage.managed=true",
     "--label",
-    `codex-cage.run_id=${input.runId}`,
+    `agent-cage.run_id=${input.runId}`,
     "--label",
-    "codex-cage.phase=ready",
+    "agent-cage.phase=ready",
     "--network",
     input.networkName,
     "--user",

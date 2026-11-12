@@ -48,7 +48,7 @@ export class GuardViolationError extends Error {
 
 const envAssignmentPattern = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
 const minSecretLength = 4;
-const envFilePath = ".codex-cage.env";
+const envFilePath = ".agent-cage.env";
 
 const tokenPatterns = [
   {
@@ -73,7 +73,7 @@ const tokenPatterns = [
   },
 ] as const;
 
-export async function readCodexCageEnv(
+export async function readAgentCageEnv(
   cwd: string,
   relativePath = envFilePath,
 ): Promise<Record<string, string>> {
@@ -240,7 +240,7 @@ export function isSensitiveFilePath(path: string): boolean {
 
   return (
     basename === ".env" ||
-    basename === ".codex-cage.env" ||
+    basename === ".agent-cage.env" ||
     basename === ".npmrc" ||
     basename === ".pypirc" ||
     basename === ".netrc" ||
@@ -342,7 +342,7 @@ function isSampleEnvFilePath(path: string): boolean {
     path.endsWith(".env.example") ||
     path.endsWith(".env.sample") ||
     path.endsWith(".env.template") ||
-    path.endsWith(".codex-cage.env.example")
+    path.endsWith(".agent-cage.env.example")
   );
 }
 

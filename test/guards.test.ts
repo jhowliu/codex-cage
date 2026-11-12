@@ -10,12 +10,12 @@ import {
   guardAttemptDecision,
   isSensitiveFilePath,
   parseEnvFile,
-  readCodexCageEnv,
+  readAgentCageEnv,
   scanDiffForGuardViolations,
 } from "../src/guards.js";
 
 async function tempRepo(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "codex-cage-guards-"));
+  return await mkdtemp(join(tmpdir(), "agent-cage-guards-"));
 }
 
 test("parseEnvFile parses simple dotenv assignments without leaking examples", () => {
@@ -40,23 +40,23 @@ test("parseEnvFile rejects malformed assignments with line numbers", () => {
   assert.throws(() => parseEnvFile("OPENAI_API_KEY=secret\nnot valid\n"), /line 2/);
 });
 
-test("readCodexCageEnv returns empty env when the local secret file is absent", async () => {
+test("readAgentCageEnv returns empty env when the local secret file is absent", async () => {
   const cwd = await tempRepo();
 
   try {
-    assert.deepEqual(await readCodexCageEnv(cwd), {});
+    assert.deepEqual(await readAgentCageEnv(cwd), {});
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });
 
-test("readCodexCageEnv reads local secrets from .codex-cage.env", async () => {
+test("readAgentCageEnv reads local secrets from .agent-cage.env", async () => {
   const cwd = await tempRepo();
 
   try {
-    await writeFile(join(cwd, ".codex-cage.env"), "GITHUB_TOKEN=ghp_secret\n", "utf8");
+    await writeFile(join(cwd, ".agent-cage.env"), "GITHUB_TOKEN=ghp_secret\n", "utf8");
 
-    assert.deepEqual(await readCodexCageEnv(cwd), {
+    assert.deepEqual(await readAgentCageEnv(cwd), {
       GITHUB_TOKEN: "ghp_secret",
     });
   } finally {
@@ -156,7 +156,7 @@ test("scanDiffForGuardViolations allows sample env files unless content looks se
 });
 
 test("isSensitiveFilePath classifies auth files and sample env files", () => {
-  assert.equal(isSensitiveFilePath(".codex-cage.env"), true);
+  assert.equal(isSensitiveFilePath(".agent-cage.env"), true);
   assert.equal(isSensitiveFilePath(".env"), true);
   assert.equal(isSensitiveFilePath(".env.example"), false);
   assert.equal(isSensitiveFilePath(".ssh/id_ed25519"), true);

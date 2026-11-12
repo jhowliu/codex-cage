@@ -36,18 +36,18 @@ type RecordedCall = {
 
 const repo: GithubRepo = {
   owner: "jhowliu",
-  name: "codex-cage",
-  fullName: "jhowliu/codex-cage",
+  name: "agent-cage",
+  fullName: "jhowliu/agent-cage",
 };
 
 const issue: IssueContext = {
   source: "github",
-  url: "https://github.com/jhowliu/codex-cage/issues/13",
+  url: "https://github.com/jhowliu/agent-cage/issues/13",
   identifier: "#13",
   title: "Docs and QA",
   body: "Document the workflow and add QA coverage.",
   comments: [],
-  inferredRepo: "jhowliu/codex-cage",
+  inferredRepo: "jhowliu/agent-cage",
 };
 
 const metadata: PublishMetadata = {
@@ -189,7 +189,7 @@ async function runFakeQaScenario(input: FakeRunInput): Promise<QaResult> {
         ],
   );
   const gh = recordingCommandRunner([
-    commandResult("https://github.com/jhowliu/codex-cage/pull/99\n"),
+    commandResult("https://github.com/jhowliu/agent-cage/pull/99\n"),
   ]);
 
   try {
@@ -198,8 +198,8 @@ async function runFakeQaScenario(input: FakeRunInput): Promise<QaResult> {
       repo,
       issue,
       baseBranch: "main",
-      authorName: "Codex Cage",
-      authorEmail: "codex-cage@users.noreply.github.com",
+      authorName: "Agent Cage",
+      authorEmail: "agent-cage@users.noreply.github.com",
       metadata,
       git,
       gh,
@@ -242,7 +242,7 @@ test("QA harness covers success, verify failure, review blocking, secret guard f
       scenario: "success",
       status: "succeeded",
       failureCode: null,
-      prUrl: "https://github.com/jhowliu/codex-cage/pull/99",
+      prUrl: "https://github.com/jhowliu/agent-cage/pull/99",
     },
     {
       scenario: "verify_failed",

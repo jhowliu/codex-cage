@@ -70,7 +70,7 @@ export async function fetchLinearIssueContext(
       },
       body: JSON.stringify({
         query: `
-          query CodexCageIssue($id: String!) {
+          query AgentCageIssue($id: String!) {
             issue(id: $id) {
               identifier
               title

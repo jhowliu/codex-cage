@@ -77,4 +77,4 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.version=${{ env.IMAGE_VERSION }}
-            org.opencontainers.image.description=Codex Cage base agent image
+            org.opencontainers.image.description=Agent Cage base agent image

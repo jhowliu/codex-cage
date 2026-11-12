@@ -7,13 +7,13 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCli } from "../src/commands.js";
-import type { RunCommandOptions, RunCodexCageResult } from "../src/run.js";
+import type { RunCommandOptions, RunAgentCageResult } from "../src/run.js";
 import { RunFailureError } from "../src/run/errors.js";
 import { openRunStore } from "../src/state.js";
 
 async function runCliInProcess(
   args: string[],
-  result: RunCodexCageResult,
+  result: RunAgentCageResult,
 ): Promise<{ exitCode: number | string | undefined; calls: RunCommandOptions[] }> {
   const calls: RunCommandOptions[] = [];
   const originalConsoleLog = console.log;
@@ -21,7 +21,7 @@ async function runCliInProcess(
   process.exitCode = 0;
 
   const program = createCli({
-    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+    runAgentCage: async (input): Promise<RunAgentCageResult> => {
       calls.push(input);
       return result;
     },
@@ -61,7 +61,7 @@ test("root help lists commands", () => {
   const result = runCli(["--help"]);
 
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /Usage: codex-cage/);
+  assert.match(result.stdout, /Usage: agent-cage/);
   assert.match(result.stdout, /\bsetup\b/);
   assert.match(result.stdout, /\bdoctor\b/);
   assert.match(result.stdout, /\brun\b/);
@@ -93,7 +93,7 @@ test("run accepts a positional issue URL", async () => {
   const originalConsoleLog = console.log;
   const originalExitCode = process.exitCode;
   const program = createCli({
-    runCodexCage: async (input): Promise<RunCodexCageResult> => {
+    runAgentCage: async (input): Promise<RunAgentCageResult> => {
       calls.push(input);
       return {
         runId: "run-cli-test",
@@ -112,9 +112,9 @@ test("run accepts a positional issue URL", async () => {
     await program.parseAsync(
       [
         "run",
-        "https://github.com/jhowliu/codex-cage/issues/35",
+        "https://github.com/jhowliu/agent-cage/issues/35",
         "--repo",
-        "jhowliu/codex-cage",
+        "jhowliu/agent-cage",
       ],
       { from: "user" },
     );
@@ -125,27 +125,27 @@ test("run accepts a positional issue URL", async () => {
 
   assert.deepEqual(calls, [
     {
-      issueUrl: "https://github.com/jhowliu/codex-cage/issues/35",
-      repo: "jhowliu/codex-cage",
+      issueUrl: "https://github.com/jhowliu/agent-cage/issues/35",
+      repo: "jhowliu/agent-cage",
     },
   ]);
 });
 
 test("run writes the result file and exits zero on success", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-result-"));
   const resultPath = join(cwd, "result.json");
 
   try {
-    const successResult: RunCodexCageResult = {
+    const successResult: RunAgentCageResult = {
       runId: "run-ok",
       status: "succeeded",
       failureCode: null,
-      prUrl: "https://github.com/jhowliu/codex-cage/pull/7",
+      prUrl: "https://github.com/jhowliu/agent-cage/pull/7",
     };
     const { exitCode } = await runCliInProcess(
       [
         "run",
-        "https://github.com/jhowliu/codex-cage/issues/7",
+        "https://github.com/jhowliu/agent-cage/issues/7",
         "--result-json",
         resultPath,
       ],
@@ -160,11 +160,11 @@ test("run writes the result file and exits zero on success", async () => {
 });
 
 test("run writes the result file and exits non-zero on failure", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-result-"));
   const resultPath = join(cwd, "result.json");
 
   try {
-    const failureResult: RunCodexCageResult = {
+    const failureResult: RunAgentCageResult = {
       runId: "run-fail",
       status: "failed",
       failureCode: "verify_failed",
@@ -173,7 +173,7 @@ test("run writes the result file and exits non-zero on failure", async () => {
     const { exitCode } = await runCliInProcess(
       [
         "run",
-        "https://github.com/jhowliu/codex-cage/issues/8",
+        "https://github.com/jhowliu/agent-cage/issues/8",
         "--result-json",
         resultPath,
       ],
@@ -188,20 +188,20 @@ test("run writes the result file and exits non-zero on failure", async () => {
 });
 
 test("run reads the result file path from the environment", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-result-"));
   const resultPath = join(cwd, "env-result.json");
-  const previous = process.env.CODEX_CAGE_RESULT_FILE;
-  process.env.CODEX_CAGE_RESULT_FILE = resultPath;
+  const previous = process.env.AGENT_CAGE_RESULT_FILE;
+  process.env.AGENT_CAGE_RESULT_FILE = resultPath;
 
   try {
-    const failureResult: RunCodexCageResult = {
+    const failureResult: RunAgentCageResult = {
       runId: "run-env",
       status: "failed",
       failureCode: "review_blocking",
       prUrl: null,
     };
     const { exitCode } = await runCliInProcess(
-      ["run", "https://github.com/jhowliu/codex-cage/issues/9"],
+      ["run", "https://github.com/jhowliu/agent-cage/issues/9"],
       failureResult,
     );
 
@@ -209,24 +209,24 @@ test("run reads the result file path from the environment", async () => {
     assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), failureResult);
   } finally {
     if (previous === undefined) {
-      delete process.env.CODEX_CAGE_RESULT_FILE;
+      delete process.env.AGENT_CAGE_RESULT_FILE;
     } else {
-      process.env.CODEX_CAGE_RESULT_FILE = previous;
+      process.env.AGENT_CAGE_RESULT_FILE = previous;
     }
     await rm(cwd, { recursive: true, force: true });
   }
 });
 
 test("run writes a result file for preflight failures", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-result-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-result-"));
   const resultPath = join(cwd, "preflight-result.json");
   const originalConsoleError = console.error;
   const originalExitCode = process.exitCode;
   process.exitCode = 0;
   console.error = () => undefined;
   const program = createCli({
-    runCodexCage: async () => {
-      throw new RunFailureError("missing_config", ".codex-cage.yml was not found.");
+    runAgentCage: async () => {
+      throw new RunFailureError("missing_config", ".agent-cage.yml was not found.");
     },
   });
   program.exitOverride();
@@ -236,7 +236,7 @@ test("run writes a result file for preflight failures", async () => {
     await program.parseAsync(
       [
         "run",
-        "https://github.com/jhowliu/codex-cage/issues/10",
+        "https://github.com/jhowliu/agent-cage/issues/10",
         "--result-json",
         resultPath,
       ],
@@ -257,17 +257,17 @@ test("run writes a result file for preflight failures", async () => {
 });
 
 test("runs list and show read local run metadata", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-runs-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-runs-"));
 
   try {
     const store = await openRunStore(cwd);
     await store.createRun({
       id: "run-1",
-      issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+      issueUrl: "https://github.com/jhowliu/agent-cage/issues/4",
       issueKey: "GH-4",
-      repo: "jhowliu/codex-cage",
+      repo: "jhowliu/agent-cage",
       baseBranch: "main",
-      branch: "codex-cage/gh-4-run-1",
+      branch: "agent-cage/gh-4-run-1",
       startedAt: new Date("2026-04-25T00:00:00.000Z"),
     });
     await store.updateRunStatus("run-1", {
@@ -292,22 +292,22 @@ test("runs list and show read local run metadata", async () => {
 });
 
 test("runs show can emit color when forced", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-color-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-color-"));
 
   try {
     const store = await openRunStore(cwd);
     await store.createRun({
       id: "run-color",
-      issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+      issueUrl: "https://github.com/jhowliu/agent-cage/issues/4",
       issueKey: "GH-4",
-      repo: "jhowliu/codex-cage",
+      repo: "jhowliu/agent-cage",
       baseBranch: "main",
-      branch: "codex-cage/gh-4-run-color",
+      branch: "agent-cage/gh-4-run-color",
       startedAt: new Date("2026-04-25T00:00:00.000Z"),
     });
     await store.updateRunStatus("run-color", {
       status: "succeeded",
-      prUrl: "https://github.com/jhowliu/codex-cage/pull/4",
+      prUrl: "https://github.com/jhowliu/agent-cage/pull/4",
       finishedAt: new Date("2026-04-25T00:02:00.000Z"),
     });
     store.close();
@@ -329,16 +329,16 @@ test("runs show can emit color when forced", async () => {
 });
 
 test("runs list --json prints each run newest first with whether it was interrupted", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-runs-json-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-runs-json-"));
   // Above the largest pid Linux or macOS assigns, so no process has it.
   const deadPid = 2 ** 22 + 12_345;
   const entry = (id: string, minute: number) => ({
     id,
-    issueUrl: `https://github.com/jhowliu/codex-cage/issues/${minute}`,
+    issueUrl: `https://github.com/jhowliu/agent-cage/issues/${minute}`,
     issueKey: `GH-${minute}`,
-    repo: "jhowliu/codex-cage",
+    repo: "jhowliu/agent-cage",
     baseBranch: "main",
-    branch: `codex-cage/gh-${minute}-${id}`,
+    branch: `agent-cage/gh-${minute}-${id}`,
     startedAt: `2026-04-25T00:0${minute}:00.000Z`,
   });
 
@@ -402,21 +402,21 @@ test("runs list --json prints each run newest first with whether it was interrup
 });
 
 test("runs list --json in a repository without runs prints an empty list", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-empty-runs-json-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-empty-runs-json-"));
 
   try {
     const result = runCli(["runs", "list", "--json"], cwd);
 
     assert.equal(result.status, 0);
     assert.equal(result.stdout, "[]\n");
-    assert.equal(existsSync(join(cwd, ".codex-cage")), false);
+    assert.equal(existsSync(join(cwd, ".agent-cage")), false);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 });
 
 test("runs list in a repository without runs creates no state and prints no warnings", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-cli-empty-runs-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-empty-runs-"));
 
   try {
     const result = runCli(["runs", "list"], cwd);
@@ -424,7 +424,7 @@ test("runs list in a repository without runs creates no state and prints no warn
     assert.equal(result.status, 0);
     assert.match(result.stdout, /No runs found\./);
     assert.equal(result.stderr, "");
-    assert.equal(existsSync(join(cwd, ".codex-cage")), false);
+    assert.equal(existsSync(join(cwd, ".agent-cage")), false);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

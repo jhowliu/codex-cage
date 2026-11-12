@@ -20,17 +20,17 @@ import {
 const deadPid = 2 ** 22 + 12_345;
 
 async function tempStateDirectory(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "codex-cage-state-"));
+  return await mkdtemp(join(tmpdir(), "agent-cage-state-"));
 }
 
 function runInput(id: string): CreateRunInput {
   return {
     id,
-    issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+    issueUrl: "https://github.com/jhowliu/agent-cage/issues/4",
     issueKey: "GH-4",
-    repo: "jhowliu/codex-cage",
+    repo: "jhowliu/agent-cage",
     baseBranch: "main",
-    branch: `codex-cage/gh-4-${id}`,
+    branch: `agent-cage/gh-4-${id}`,
     startedAt: new Date("2026-04-25T00:00:00.000Z"),
   };
 }
@@ -44,11 +44,11 @@ test("run store persists runs, phases, review cycles, and artifacts", async () =
 
     const run = await store.createRun({
       id: "run-1",
-      issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+      issueUrl: "https://github.com/jhowliu/agent-cage/issues/4",
       issueKey: "GH-4",
-      repo: "jhowliu/codex-cage",
+      repo: "jhowliu/agent-cage",
       baseBranch: "main",
-      branch: "codex-cage/gh-4-run-1",
+      branch: "agent-cage/gh-4-run-1",
       startedAt,
     });
 
@@ -66,7 +66,7 @@ test("run store persists runs, phases, review cycles, and artifacts", async () =
       runId: "run-1",
       name: "setup",
       startedAt,
-      logPath: ".codex-cage/runs/run-1/setup.log",
+      logPath: ".agent-cage/runs/run-1/setup.log",
     });
     await store.finishPhase({
       phaseId: setupPhase.id,
@@ -77,12 +77,12 @@ test("run store persists runs, phases, review cycles, and artifacts", async () =
       runId: "run-1",
       cycle: 1,
       decision: "pass",
-      reportPath: ".codex-cage/runs/run-1/review-cycle-1.json",
+      reportPath: ".agent-cage/runs/run-1/review-cycle-1.json",
     });
     const summaryPath = await store.writeArtifact("run-1", "summary.md", "# Summary\n");
     await store.updateRunStatus("run-1", {
       status: "succeeded",
-      prUrl: "https://github.com/jhowliu/codex-cage/pull/15",
+      prUrl: "https://github.com/jhowliu/agent-cage/pull/15",
       finishedAt: new Date("2026-04-25T00:02:00.000Z"),
     });
 
@@ -95,7 +95,7 @@ test("run store persists runs, phases, review cycles, and artifacts", async () =
 
     assert.equal(runs.length, 1);
     assert.equal(details.run.status, "succeeded");
-    assert.equal(details.run.prUrl, "https://github.com/jhowliu/codex-cage/pull/15");
+    assert.equal(details.run.prUrl, "https://github.com/jhowliu/agent-cage/pull/15");
     assert.equal(details.phases.length, 1);
     assert.equal(details.phases[0]?.status, "passed");
     assert.equal(details.reviewCycles.length, 1);
@@ -127,7 +127,7 @@ test("run stores opened by parallel runs keep each other's writes", async () => 
 
   try {
     // Two runs in the same repository hold their own connections, like two
-    // concurrent `codex-cage run` processes.
+    // concurrent `agent-cage run` processes.
     const first = await openRunStore(cwd);
     const second = await openRunStore(cwd);
 
@@ -213,11 +213,11 @@ test("run store records the process that runs each run", async () => {
 test("a run is interrupted only when it never finished and its process is gone", () => {
   const run = (overrides: Partial<RunRecord>): RunRecord => ({
     id: "run-1",
-    issueUrl: "https://github.com/jhowliu/codex-cage/issues/4",
+    issueUrl: "https://github.com/jhowliu/agent-cage/issues/4",
     issueKey: "GH-4",
-    repo: "jhowliu/codex-cage",
+    repo: "jhowliu/agent-cage",
     baseBranch: "main",
-    branch: "codex-cage/gh-4-run-1",
+    branch: "agent-cage/gh-4-run-1",
     status: "implementing",
     failureCode: null,
     prUrl: null,
@@ -264,8 +264,8 @@ test("a database from an earlier version gains a pid column and keeps its runs",
       );
       INSERT INTO schema_migrations VALUES (1, '1970-01-01T00:00:00.000Z');
       INSERT INTO runs (id, issue_url, issue_key, repo, base_branch, branch, status, started_at)
-      VALUES ('run-old', 'https://github.com/jhowliu/codex-cage/issues/4', 'GH-4',
-              'jhowliu/codex-cage', 'main', 'codex-cage/gh-4-run-old', 'implementing',
+      VALUES ('run-old', 'https://github.com/jhowliu/agent-cage/issues/4', 'GH-4',
+              'jhowliu/agent-cage', 'main', 'agent-cage/gh-4-run-old', 'implementing',
               '2026-04-25T00:00:00.000Z');
     `);
     old.close();

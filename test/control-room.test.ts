@@ -12,9 +12,9 @@ import { RunEventJournal } from "../src/run/events.js";
 import type { StageResult } from "../src/control-room-results.js";
 
 async function tempRepository(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), "codex-cage-control-room-repo-"));
+  const path = await mkdtemp(join(tmpdir(), "agent-cage-control-room-repo-"));
   await writeFile(
-    join(path, ".codex-cage.yml"),
+    join(path, ".agent-cage.yml"),
     "verify:\n  - npm test\n\nsetup: []\n",
     "utf8",
   );
@@ -23,7 +23,7 @@ async function tempRepository(): Promise<string> {
 
 function fakeRunner(): LocalRunnerLauncher {
   return async ({ runId, repositoryPath }): Promise<LocalRunnerHandle> => {
-    const directory = join(repositoryPath, ".codex-cage", "runs", runId);
+    const directory = join(repositoryPath, ".agent-cage", "runs", runId);
     await mkdir(directory, { recursive: true });
     const eventPath = join(directory, "events.ndjson");
     const resultPath = join(directory, "result.json");
@@ -40,7 +40,7 @@ function fakeRunner(): LocalRunnerLauncher {
           issueTitle: "Control Room smoke path",
           repository: "example/repository",
           baseBranch: "main",
-          branch: `codex-cage/${runId}`,
+          branch: `agent-cage/${runId}`,
           artifactDirectory: directory,
           executionMode: "docker",
         },
@@ -129,7 +129,7 @@ function fakeRunner(): LocalRunnerLauncher {
             stage,
             stageAttempt: 1,
             payload: {
-              branch: `codex-cage/${runId}`,
+              branch: `agent-cage/${runId}`,
               commitMessage: "Control Room smoke path",
               title: "Control Room smoke path",
               url: "https://github.com/example/repository/pull/123",
@@ -171,7 +171,7 @@ function fakeRunner(): LocalRunnerLauncher {
 
 function pendingRunner(state: { cancelled: boolean }): LocalRunnerLauncher {
   return async ({ runId, repositoryPath }): Promise<LocalRunnerHandle> => {
-    const directory = join(repositoryPath, ".codex-cage", "runs", runId);
+    const directory = join(repositoryPath, ".agent-cage", "runs", runId);
     await mkdir(directory, { recursive: true });
     const eventPath = join(directory, "events.ndjson");
     const resultPath = join(directory, "result.json");
@@ -215,7 +215,7 @@ async function waitForRun(
 }
 
 test("Control Room registers a ready repository, streams a local Run, and persists the projection", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-"));
   const repositoryPath = await tempRepository();
   const first = await createControlRoomServer({
     cwd,
@@ -295,7 +295,7 @@ test("Control Room registers a ready repository, streams a local Run, and persis
 });
 
 test("Control Room keeps repository and Run projections after server restart and serves the React shell", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-reopen-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-reopen-"));
   const repositoryPath = await tempRepository();
   const first = await createControlRoomServer({
     cwd,
@@ -343,7 +343,7 @@ test("Control Room keeps repository and Run projections after server restart and
     const script = await fetch(`${second.url}${scriptPath}`);
     assert.equal(repositories.length, 1);
     assert.equal(run.status, "succeeded");
-    assert.match(html, /Codex Cage Control Room/);
+    assert.match(html, /Agent Cage Control Room/);
     assert.equal(script.ok, true);
     assert.equal(script.headers.get("content-type"), "text/javascript; charset=utf-8");
   } finally {
@@ -354,7 +354,7 @@ test("Control Room keeps repository and Run projections after server restart and
 });
 
 test("Control Room stops active local Runners during shutdown", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-shutdown-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-shutdown-"));
   const repositoryPath = await tempRepository();
   const state = { cancelled: false };
   const server = await createControlRoomServer({
@@ -388,7 +388,7 @@ test("Control Room stops active local Runners during shutdown", async () => {
 });
 
 test("Control Room rejects invalid repository and unsupported Work Item requests", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-invalid-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-invalid-"));
   const server = await createControlRoomServer({
     cwd,
     port: 0,
@@ -419,9 +419,9 @@ test("Control Room rejects invalid repository and unsupported Work Item requests
 });
 
 test("Control Room reports GitHub auth status without exposing the configured token", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-auth-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-auth-"));
   await writeFile(
-    join(cwd, ".codex-cage.env"),
+    join(cwd, ".agent-cage.env"),
     "GITHUB_TOKEN=test-token-value\n",
     "utf8",
   );
@@ -453,9 +453,9 @@ test("Control Room reports GitHub auth status without exposing the configured to
       {
         provider: "github",
         status: "invalid",
-        source: "codex-cage-env",
+        source: "agent-cage-env",
         message:
-          "GitHub rejected the configured token. Update .codex-cage.env, then recheck.",
+          "GitHub rejected the configured token. Update .agent-cage.env, then recheck.",
       },
     );
     assert.match(status.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
@@ -467,7 +467,7 @@ test("Control Room reports GitHub auth status without exposing the configured to
 });
 
 test("Control Room reports missing GitHub auth without making a network request", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-auth-missing-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-auth-missing-"));
   const server = await createControlRoomServer({
     cwd,
     port: 0,
@@ -489,7 +489,7 @@ test("Control Room reports missing GitHub auth without making a network request"
     assert.equal(status.source, "none");
     assert.equal(
       status.message,
-      "Add GITHUB_TOKEN to .codex-cage.env, then recheck authentication.",
+      "Add GITHUB_TOKEN to .agent-cage.env, then recheck authentication.",
     );
   } finally {
     await server.close();
@@ -498,7 +498,7 @@ test("Control Room reports missing GitHub auth without making a network request"
 });
 
 test("Control Room exposes a loopback SSE snapshot stream", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-control-room-sse-"));
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-control-room-sse-"));
   const server = await createControlRoomServer({
     cwd,
     port: 0,

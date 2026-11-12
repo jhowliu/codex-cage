@@ -81,10 +81,10 @@ test("Codex review writes the output schema before running read-only", () => {
 
   assert.match(
     command,
-    /^printf %s '\{.*\}' > '\/tmp\/codex-cage-review-output-schema\.json' && /,
+    /^printf %s '\{.*\}' > '\/tmp\/agent-cage-review-output-schema\.json' && /,
   );
   assert.match(command, /--sandbox 'read-only'/);
-  assert.match(command, /--output-schema '\/tmp\/codex-cage-review-output-schema\.json'/);
+  assert.match(command, /--output-schema '\/tmp\/agent-cage-review-output-schema\.json'/);
 });
 
 test("extractClaudeResult prefers structured output over result text", () => {
