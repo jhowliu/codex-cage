@@ -13,7 +13,7 @@ export type PageName = "runs" | "repositories";
 export type AuthStatus = {
   provider: "github";
   status: "connected" | "invalid" | "missing" | "unavailable";
-  source: "codex-cage-env" | "none";
+  source: "agent-cage-env" | "none";
   message: string;
   checkedAt: string;
 };

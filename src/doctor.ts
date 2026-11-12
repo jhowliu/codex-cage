@@ -13,8 +13,8 @@ import {
   type AgentProvider,
   type AgentRole,
 } from "./agent/providers.js";
-import { resolveExecutionMode, type CodexCageConfig } from "./config.js";
-import { loadCodexCageConfigFile } from "./config-file.js";
+import { resolveExecutionMode, type AgentCageConfig } from "./config.js";
+import { loadAgentCageConfigFile } from "./config-file.js";
 import {
   credentialsForCommand,
   githubTokenFromEnv,
@@ -77,10 +77,10 @@ export async function doctorProject(
   options: DoctorOptions = {},
 ): Promise<DoctorResult> {
   const checks: DoctorCheck[] = [];
-  const configState = await loadCodexCageConfigFile(cwd);
+  const configState = await loadAgentCageConfigFile(cwd);
   if (configState.status === "missing") {
     checks.push(
-      fail("configuration", ".codex-cage.yml was not found; run codex-cage setup."),
+      fail("configuration", ".agent-cage.yml was not found; run agent-cage setup."),
     );
     return result(checks);
   }
@@ -91,7 +91,7 @@ export async function doctorProject(
     return result(checks);
   }
 
-  checks.push(pass("configuration", ".codex-cage.yml is valid."));
+  checks.push(pass("configuration", ".agent-cage.yml is valid."));
   checks.push(
     configState.config.verify.length > 0
       ? pass("verification", `${configState.config.verify.length} command(s) configured.`)
@@ -174,7 +174,7 @@ const probeTimeoutMs = 3 * 60 * 1000;
  */
 async function agentProbeChecks(input: {
   cwd: string;
-  config: CodexCageConfig;
+  config: AgentCageConfig;
   env: Record<string, string>;
   agents: AgentProviderByRole;
   codexAuthFilePath: string | undefined;
@@ -280,7 +280,7 @@ function probeFailureMessage(input: {
         input.agent.provider === "codex" && input.agent.model === defaultAgentModels.codex
           ? `A ChatGPT-account Codex login cannot use ${defaultAgentModels.codex}; set OPENAI_API_KEY or pick a model your account offers.`
           : "",
-        "Change the model in .codex-cage.yml or update the image.",
+        "Change the model in .agent-cage.yml or update the image.",
       ]
         .filter((part) => part !== "")
         .join(" ");
@@ -307,29 +307,29 @@ async function githubAuthCheck(
   if (setting.status === "invalid") {
     return warning(
       "github-auth",
-      `${githubAccountEnvName} in .codex-cage.env must be a GitHub login, got "${setting.value}".`,
+      `${githubAccountEnvName} in .agent-cage.env must be a GitHub login, got "${setting.value}".`,
     );
   }
   if (githubTokenFromEnv(env) !== undefined) {
-    return pass("github-auth", "GITHUB_TOKEN is set in .codex-cage.env.");
+    return pass("github-auth", "GITHUB_TOKEN is set in .agent-cage.env.");
   }
   const login = githubAccountLogin(setting);
   if ((await ghAuthToken(login, gh)) !== null) {
     return login === null
       ? pass(
           "github-auth",
-          "Local runs use the active gh account; run `codex-cage setup` to pin one for this repo.",
+          "Local runs use the active gh account; run `agent-cage setup` to pin one for this repo.",
         )
       : pass("github-auth", `Local runs use gh account ${login}.`);
   }
   return login === null
     ? warning(
         "github-auth",
-        "Set GITHUB_TOKEN in .codex-cage.env or run `gh auth login`.",
+        "Set GITHUB_TOKEN in .agent-cage.env or run `gh auth login`.",
       )
     : warning(
         "github-auth",
-        `gh is not signed in as ${login} (${githubAccountEnvName}); run \`gh auth login\` or rerun \`codex-cage setup\`.`,
+        `gh is not signed in as ${login} (${githubAccountEnvName}); run \`gh auth login\` or rerun \`agent-cage setup\`.`,
       );
 }
 
@@ -379,7 +379,7 @@ async function globalCredentialsChecks(
     checks.push(
       warning(
         "global-credentials",
-        `${path} only supplies ${globalCredentialNames.join(", ")}; ignored ${credentialEnv.ignoredGlobalNames.join(", ")}. Keep GitHub credentials in each repo's .codex-cage.env.`,
+        `${path} only supplies ${globalCredentialNames.join(", ")}; ignored ${credentialEnv.ignoredGlobalNames.join(", ")}. Keep GitHub credentials in each repo's .agent-cage.env.`,
       ),
     );
   }
@@ -398,7 +398,7 @@ async function fileMode(path: string): Promise<number | null> {
 
 async function checkActions(
   cwd: string,
-  actions: CodexCageConfig["actions"],
+  actions: AgentCageConfig["actions"],
   agents: AgentProviderByRole,
   checks: DoctorCheck[],
   runCommand: DoctorCommandRunner,
@@ -407,8 +407,8 @@ async function checkActions(
   const workflow = await readOptionalFile(workflowPath);
   checks.push(
     workflow?.startsWith(GENERATED_WORKFLOW_MARKER) === true
-      ? pass("workflow", `${actions.workflow} is managed by Codex Cage.`)
-      : fail("workflow", `${actions.workflow} is missing or not managed by Codex Cage.`),
+      ? pass("workflow", `${actions.workflow} is managed by Agent Cage.`)
+      : fail("workflow", `${actions.workflow} is missing or not managed by Agent Cage.`),
   );
 
   const ghAuth = await runCommand("gh", ["auth", "status"], cwd);

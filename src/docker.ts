@@ -84,11 +84,11 @@ export type CleanupDockerReport = {
   skippedActiveRunIds: string[];
 };
 
-export const defaultSandboxImage = "ghcr.io/jhowliu/codex-cage/base:0.1.2";
+export const defaultSandboxImage = "ghcr.io/jhowliu/agent-cage/base:0.1.2";
 export const defaultWorkspacePath = "/workspace";
 
-const runIdLabelName = "codex-cage.run_id";
-const managedLabelName = "codex-cage.managed";
+const runIdLabelName = "agent-cage.run_id";
+const managedLabelName = "agent-cage.managed";
 const managedLabel = `${managedLabelName}=true`;
 
 export const execaDockerRunner: DockerRunner = {
@@ -227,7 +227,7 @@ export async function buildRuntimeImage(
   const image = options.imageName ?? runtimeImageName(options.runId);
   const labels = {
     [runIdLabelName]: options.runId,
-    "codex-cage.kind": "runtime-image",
+    "agent-cage.kind": "runtime-image",
     ...options.labels,
   };
 
@@ -315,13 +315,13 @@ export function dockerResourceNames(runId: string): DockerResourceNames {
   const safeRunId = safeDockerNameSegment(runId);
 
   return {
-    volumeName: `codex-cage-${safeRunId}-workspace`,
-    networkName: `codex-cage-${safeRunId}`,
+    volumeName: `agent-cage-${safeRunId}-workspace`,
+    networkName: `agent-cage-${safeRunId}`,
   };
 }
 
 export function runtimeImageName(runId: string): string {
-  return `codex-cage/runtime-${safeDockerNameSegment(runId)}:latest`;
+  return `agent-cage/runtime-${safeDockerNameSegment(runId)}:latest`;
 }
 
 export function unauthenticatedRemoteUrl(cloneUrl: string): string {

@@ -51,7 +51,7 @@ test("listGhAccounts asks gh for github.com status as JSON", async () => {
 
 test("ghAuthToken selects the account only when one is pinned", async () => {
   assert.deepEqual(ghAuthTokenArgs(null), ["auth", "token", "--hostname", "github.com"]);
-  const setting = githubAccountSetting({ CODEX_CAGE_GH_USER: "work-account" });
+  const setting = githubAccountSetting({ AGENT_CAGE_GH_USER: "work-account" });
   assert.equal(setting.status, "set");
   if (setting.status !== "set") return;
   assert.deepEqual(ghAuthTokenArgs(setting.login), [
@@ -82,14 +82,14 @@ test("ghAuthToken returns null when gh fails or prints nothing", async () => {
 
 test("githubAccountSetting distinguishes unset, valid, and invalid values", () => {
   assert.deepEqual(githubAccountSetting({}), { status: "unset" });
-  assert.deepEqual(githubAccountSetting({ CODEX_CAGE_GH_USER: " " }), {
+  assert.deepEqual(githubAccountSetting({ AGENT_CAGE_GH_USER: " " }), {
     status: "unset",
   });
-  assert.deepEqual(githubAccountSetting({ CODEX_CAGE_GH_USER: "a-b1" }), {
+  assert.deepEqual(githubAccountSetting({ AGENT_CAGE_GH_USER: "a-b1" }), {
     status: "set",
     login: "a-b1",
   });
   for (const value of ["-lead", "trail-", "two--dash", "has space", "x".repeat(40)]) {
-    assert.equal(githubAccountSetting({ CODEX_CAGE_GH_USER: value }).status, "invalid");
+    assert.equal(githubAccountSetting({ AGENT_CAGE_GH_USER: value }).status, "invalid");
   }
 });

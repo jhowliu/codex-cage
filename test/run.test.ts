@@ -18,8 +18,8 @@ import {
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
 import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js";
 import {
-  runCodexCage,
-  type RunCodexCageDependencies,
+  runAgentCage,
+  type RunAgentCageDependencies,
   type RunProgressEvent,
   type ShellRunner,
 } from "../src/run.js";
@@ -33,8 +33,8 @@ import { openRunStore, type FailureCode } from "../src/state.js";
 
 const repo: GithubRepo = {
   owner: "jhowliu",
-  name: "codex-cage",
-  fullName: "jhowliu/codex-cage",
+  name: "agent-cage",
+  fullName: "jhowliu/agent-cage",
 };
 
 const repoResolution: RepoResolution = {
@@ -44,7 +44,7 @@ const repoResolution: RepoResolution = {
 
 const issue: IssueContext = {
   source: "github",
-  url: "https://github.com/jhowliu/codex-cage/issues/26",
+  url: "https://github.com/jhowliu/agent-cage/issues/26",
   identifier: "#26",
   title: "Wire run command",
   body: "Connect the run command to the orchestrator.",
@@ -57,14 +57,14 @@ function commandResult(stdout = "", exitCode = 0, stderr = ""): CommandResult {
 }
 
 async function createProject(config: string): Promise<string> {
-  const cwd = await mkdtemp(join(tmpdir(), "codex-cage-run-"));
-  await writeFile(join(cwd, ".codex-cage.yml"), config, "utf8");
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-run-"));
+  await writeFile(join(cwd, ".agent-cage.yml"), config, "utf8");
   return cwd;
 }
 
 async function readRunEvents(cwd: string, runId: string): Promise<RunEvent[]> {
   const content = await readFile(
-    join(cwd, ".codex-cage", "runs", runId, "events.ndjson"),
+    join(cwd, ".agent-cage", "runs", runId, "events.ndjson"),
     "utf8",
   );
   return content
@@ -163,7 +163,7 @@ function modeDeps(
   mode: "docker" | "direct",
   shell: ShellRunner,
   events: string[],
-): RunCodexCageDependencies {
+): RunAgentCageDependencies {
   if (mode === "direct") {
     return {
       executionMode: "direct",
@@ -171,7 +171,7 @@ function modeDeps(
         throw new Error("Docker sandbox must not be created in direct mode.");
       },
       createHostWorkspace: async () => ({
-        workspacePath: "/tmp/codex-cage-happy",
+        workspacePath: "/tmp/agent-cage-happy",
         cleanup: async () => undefined,
       }),
       createHostShellRunner: () => shell,
@@ -189,7 +189,7 @@ function modeDeps(
 }
 
 for (const mode of ["docker", "direct"] as const) {
-  test(`runCodexCage reaches every gate and opens a PR in ${mode} mode`, async () => {
+  test(`runAgentCage reaches every gate and opens a PR in ${mode} mode`, async () => {
     const cwd = await createProject(`
 setup:
   - npm install
@@ -202,7 +202,7 @@ verify:
     const shell = happyPathShell();
 
     try {
-      const result = await runCodexCage(
+      const result = await runAgentCage(
         { cwd, issueUrl: issue.url },
         {
           generateRunId: () => `run-happy-${mode}`,
@@ -212,16 +212,16 @@ verify:
           resolveTargetRepo: async () => repoResolution,
           createAuthenticatedRepo: () => ({
             repo,
-            cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-            redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+            cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+            redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
           }),
           runIndependentReview: async () => passingReview(),
           publishSuccessfulRun: async (input) => ({
-            branchName: input.branchName ?? `codex-cage/gh-26-${mode}`,
+            branchName: input.branchName ?? `agent-cage/gh-26-${mode}`,
             commitMessage: "#26 Wire run command",
             prTitle: "#26 Wire run command",
             prBody: "body",
-            prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+            prUrl: "https://github.com/jhowliu/agent-cage/pull/26",
           }),
           onEvent: (event) => {
             runnerEvents.push(event);
@@ -235,7 +235,7 @@ verify:
 
       // Engine outcome is mode-agnostic: same status, PR, and phase sequence.
       assert.equal(result.status, "succeeded");
-      assert.equal(result.prUrl, "https://github.com/jhowliu/codex-cage/pull/26");
+      assert.equal(result.prUrl, "https://github.com/jhowliu/agent-cage/pull/26");
 
       const store = await openRunStore(cwd);
       const details = store.getRunDetails(`run-happy-${mode}`);
@@ -247,7 +247,7 @@ verify:
 
       const persistedEvents = await readRunEvents(cwd, `run-happy-${mode}`);
       const replay = await replayRunEventJournal(
-        join(cwd, ".codex-cage", "runs", `run-happy-${mode}`, "events.ndjson"),
+        join(cwd, ".agent-cage", "runs", `run-happy-${mode}`, "events.ndjson"),
       );
       assert.deepEqual(runnerEvents, persistedEvents);
       assert.doesNotMatch(JSON.stringify(persistedEvents), /tests passed|implemented/);
@@ -310,7 +310,7 @@ verify:
   });
 }
 
-test("runCodexCage parses review agent stdout without command log noise", async () => {
+test("runAgentCage parses review agent stdout without command log noise", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
@@ -337,7 +337,7 @@ verify:
   );
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -351,27 +351,27 @@ verify:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,
         publishSuccessfulRun: async (input) => ({
-          branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+          branchName: input.branchName ?? "agent-cage/gh-26-run-test",
           commitMessage: "#26 Wire run command",
           prTitle: "#26 Wire run command",
           prBody: "body",
-          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+          prUrl: "https://github.com/jhowliu/agent-cage/pull/26",
         }),
       },
     );
 
     const reviewLog = await readFile(
-      join(cwd, ".codex-cage", "runs", "run-review-stdout", "review.log"),
+      join(cwd, ".agent-cage", "runs", "run-review-stdout", "review.log"),
       "utf8",
     );
     const reviewPrompt = await readFile(
-      join(cwd, ".codex-cage", "runs", "run-review-stdout", "review-prompt-0.md"),
+      join(cwd, ".agent-cage", "runs", "run-review-stdout", "review-prompt-0.md"),
       "utf8",
     );
 
@@ -391,23 +391,23 @@ verify:
   }
 });
 
-test("runCodexCage executes the happy path and records a successful run", async () => {
+test("runAgentCage executes the happy path and records a successful run", async () => {
   const cwd = await createProject(`
 setup:
   - npm install
 verify:
   - npm test
 `);
-  await mkdir(join(cwd, ".codex-cage"), { recursive: true });
+  await mkdir(join(cwd, ".agent-cage"), { recursive: true });
   await mkdir(join(cwd, ".github"), { recursive: true });
   await writeFile(join(cwd, "AGENTS.md"), "Do not prompt-inject AGENTS.\n", "utf8");
   await writeFile(
-    join(cwd, ".codex-cage", "instructions.md"),
+    join(cwd, ".agent-cage", "instructions.md"),
     "Do not prompt-inject cage instructions.\n",
     "utf8",
   );
   await writeFile(
-    join(cwd, ".codex-cage", "review-policy.md"),
+    join(cwd, ".agent-cage", "review-policy.md"),
     "Do not prompt-inject review policy contents.\n",
     "utf8",
   );
@@ -444,7 +444,7 @@ verify:
   let reviewEnv: Record<string, string> | undefined;
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -463,8 +463,8 @@ verify:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: (options: DockerSandboxOptions) => {
           sandboxOptions.push(options);
@@ -488,11 +488,11 @@ verify:
           await input.git?.run(["status"]);
           await input.gh?.run(["pr", "view"]);
           return {
-            branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+            branchName: input.branchName ?? "agent-cage/gh-26-run-test",
             commitMessage: "#26 Wire run command",
             prTitle: "#26 Wire run command",
             prBody: "body",
-            prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+            prUrl: "https://github.com/jhowliu/agent-cage/pull/26",
           };
         },
       },
@@ -502,7 +502,7 @@ verify:
       runId: "run-test-123",
       status: "succeeded",
       failureCode: null,
-      prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+      prUrl: "https://github.com/jhowliu/agent-cage/pull/26",
     });
     assert.deepEqual(events, ["sandbox:create", "sandbox:clone", "sandbox:cleanup"]);
     assert.equal(sandboxOptions[0]?.image, defaultSandboxImage);
@@ -568,7 +568,7 @@ verify:
     const store = await openRunStore(cwd);
     const details = store.getRunDetails("run-test-123");
     store.close();
-    const runDirectory = join(cwd, ".codex-cage", "runs", "run-test-123");
+    const runDirectory = join(cwd, ".agent-cage", "runs", "run-test-123");
     const implementationPrompt = await readFile(
       join(runDirectory, "implementation-prompt-1.md"),
       "utf8",
@@ -580,14 +580,14 @@ verify:
     );
 
     assert.equal(details.run.status, "succeeded");
-    assert.equal(details.run.prUrl, "https://github.com/jhowliu/codex-cage/pull/26");
+    assert.equal(details.run.prUrl, "https://github.com/jhowliu/agent-cage/pull/26");
     assert.match(implementationPrompt, /native Codex AGENTS\.md/);
     assert.doesNotMatch(implementationPrompt, /Do not prompt-inject/);
     assert.doesNotMatch(reviewIssueContext, /Do not prompt-inject/);
     assert.match(reviewPrompt, /Verification summary:/);
     assert.match(
       reviewPrompt,
-      /Target review policy: present at \.codex-cage\/review-policy\.md/,
+      /Target review policy: present at \.agent-cage\/review-policy\.md/,
     );
     assert.doesNotMatch(reviewPrompt, /Do not prompt-inject/);
     assert.match(reviewPolicyStatus, /Target review policy: present/);
@@ -609,14 +609,14 @@ verify:
   }
 });
 
-test("runCodexCage runs direct mode on the host without Docker resources", async () => {
+test("runAgentCage runs direct mode on the host without Docker resources", async () => {
   const cwd = await createProject(`
 setup:
   - npm install
 verify:
   - npm test
 services:
-  compose: .codex-cage/docker-compose.yml
+  compose: .agent-cage/docker-compose.yml
   ready:
     - pg_isready
 `);
@@ -643,7 +643,7 @@ services:
   let cleanupCalls = 0;
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -657,8 +657,8 @@ services:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => {
           throw new Error("Docker sandbox must not be created in direct mode.");
@@ -669,7 +669,7 @@ services:
         createHostWorkspace: async (runId: string) => {
           workspaceRunId = runId;
           return {
-            workspacePath: "/tmp/codex-cage-direct",
+            workspacePath: "/tmp/agent-cage-direct",
             cleanup: async () => {
               cleanupCalls += 1;
             },
@@ -681,11 +681,11 @@ services:
         },
         runIndependentReview: async () => passingReview(),
         publishSuccessfulRun: async (input) => ({
-          branchName: input.branchName ?? "codex-cage/gh-26-run-direct",
+          branchName: input.branchName ?? "agent-cage/gh-26-run-direct",
           commitMessage: "#26 Wire run command",
           prTitle: "#26 Wire run command",
           prBody: "body",
-          prUrl: "https://github.com/jhowliu/codex-cage/pull/99",
+          prUrl: "https://github.com/jhowliu/agent-cage/pull/99",
         }),
       },
     );
@@ -694,16 +694,16 @@ services:
       runId: "run-direct-1",
       status: "succeeded",
       failureCode: null,
-      prUrl: "https://github.com/jhowliu/codex-cage/pull/99",
+      prUrl: "https://github.com/jhowliu/agent-cage/pull/99",
     });
     assert.equal(workspaceRunId, "run-direct-1");
-    assert.equal(hostShellWorkspacePath, "/tmp/codex-cage-direct");
+    assert.equal(hostShellWorkspacePath, "/tmp/agent-cage-direct");
     assert.equal(cleanupCalls, 1);
     assert.ok(
       shell.commands.some(
         (command) =>
           command.includes("git clone") &&
-          command.includes("https://github.com/jhowliu/codex-cage.git"),
+          command.includes("https://github.com/jhowliu/agent-cage.git"),
       ),
       "direct mode should clone via the host shell",
     );
@@ -722,7 +722,7 @@ services:
   }
 });
 
-test("runCodexCage redacts credential-bearing publish failures in artifacts", async () => {
+test("runAgentCage redacts credential-bearing publish failures in artifacts", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
@@ -746,7 +746,7 @@ verify:
   );
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -760,15 +760,15 @@ verify:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,
         runIndependentReview: async () => passingReview(),
         publishSuccessfulRun: async () => {
           throw new Error(
-            "push failed: https://x-access-token:token-value@github.com/jhowliu/codex-cage.git",
+            "push failed: https://x-access-token:token-value@github.com/jhowliu/agent-cage.git",
           );
         },
         onEvent: (event) => {
@@ -777,7 +777,7 @@ verify:
       },
     );
 
-    const runDirectory = join(cwd, ".codex-cage", "runs", "run-publish-redact");
+    const runDirectory = join(cwd, ".agent-cage", "runs", "run-publish-redact");
     const prLog = await readFile(join(runDirectory, "pr.log"), "utf8");
     const summary = await readFile(join(runDirectory, "summary.md"), "utf8");
     const eventJournal = await readFile(join(runDirectory, "events.ndjson"), "utf8");
@@ -809,13 +809,13 @@ verify:
   }
 });
 
-test("runCodexCage builds configured runtime Dockerfiles before cloning", async () => {
+test("runAgentCage builds configured runtime Dockerfiles before cloning", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
 runtime:
   image: registry.example.com/base:custom
-  dockerfile: .codex-cage/Dockerfile
+  dockerfile: .agent-cage/Dockerfile
 `);
   const events: string[] = [];
   const sandboxOptions: DockerSandboxOptions[] = [];
@@ -836,7 +836,7 @@ runtime:
   );
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -850,13 +850,13 @@ runtime:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         buildRuntimeImage: async (options) => {
           events.push(`build:${options.dockerfilePath}:${options.contextPath}`);
           return {
-            image: "codex-cage/runtime-run-image-123:latest",
+            image: "agent-cage/runtime-run-image-123:latest",
             dockerfilePath: options.dockerfilePath,
             contextPath: options.contextPath,
           };
@@ -868,11 +868,11 @@ runtime:
         createShellRunner: () => shell,
         runIndependentReview: async () => passingReview(),
         publishSuccessfulRun: async (input) => ({
-          branchName: input.branchName ?? "codex-cage/gh-26-run-test",
+          branchName: input.branchName ?? "agent-cage/gh-26-run-test",
           commitMessage: "#26 Wire run command",
           prTitle: "#26 Wire run command",
           prBody: "body",
-          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+          prUrl: "https://github.com/jhowliu/agent-cage/pull/26",
         }),
       },
     );
@@ -884,12 +884,12 @@ runtime:
       "sandbox:clone",
       "sandbox:cleanup",
     ]);
-    assert.equal(sandboxOptions[0]?.image, "codex-cage/runtime-run-image-123:latest");
+    assert.equal(sandboxOptions[0]?.image, "agent-cage/runtime-run-image-123:latest");
 
     const store = await openRunStore(cwd);
     const details = store.getRunDetails("run-image-123");
     const runtimeImage = await readFile(
-      join(cwd, ".codex-cage", "runs", "run-image-123", "runtime-image.json"),
+      join(cwd, ".agent-cage", "runs", "run-image-123", "runtime-image.json"),
       "utf8",
     );
     store.close();
@@ -898,7 +898,7 @@ runtime:
       details.phases.map((phase) => phase.name),
       ["preflight", "runtime_image", "cloning", "implement", "verify", "review", "pr"],
     );
-    assert.match(runtimeImage, /codex-cage\/runtime-run-image-123:latest/);
+    assert.match(runtimeImage, /agent-cage\/runtime-run-image-123:latest/);
     assert.match(runtimeImage, /"source": "built"/);
 
     const runnerEvents = await readRunEvents(cwd, "run-image-123");
@@ -916,17 +916,17 @@ runtime:
   }
 });
 
-test("runCodexCage records runtime image build failures", async () => {
+test("runAgentCage records runtime image build failures", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
 runtime:
-  dockerfile: .codex-cage/Dockerfile
+  dockerfile: .agent-cage/Dockerfile
 `);
   const events: string[] = [];
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -940,8 +940,8 @@ runtime:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         buildRuntimeImage: async () => {
           events.push("build");
@@ -970,7 +970,7 @@ runtime:
     assert.equal(details.phases.at(-1)?.status, "failed");
 
     const replay = await replayRunEventJournal(
-      join(cwd, ".codex-cage", "runs", "run-image-failed", "events.ndjson"),
+      join(cwd, ".agent-cage", "runs", "run-image-failed", "events.ndjson"),
     );
     assert.equal(replay.status, "failed");
     assert.deepEqual(
@@ -982,7 +982,7 @@ runtime:
   }
 });
 
-test("runCodexCage preserves accepted changes before the publisher commits the workspace", async () => {
+test("runAgentCage preserves accepted changes before the publisher commits the workspace", async () => {
   const cwd = await createProject("verify:\n  - npm test\nagent:\n  max_iterations: 1\n");
   const backing = happyPathShell();
   let committed = false;
@@ -994,7 +994,7 @@ test("runCodexCage preserves accepted changes before the publisher commits the w
     },
   };
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       { cwd, issueUrl: issue.url },
       {
         executionMode: "docker",
@@ -1005,8 +1005,8 @@ test("runCodexCage preserves accepted changes before the publisher commits the w
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox([]),
         createShellRunner: () => shell,
@@ -1018,13 +1018,13 @@ test("runCodexCage preserves accepted changes before the publisher commits the w
             commitMessage: "Fix",
             prTitle: "Fix",
             prBody: "body",
-            prUrl: "https://github.com/jhowliu/codex-cage/pull/1",
+            prUrl: "https://github.com/jhowliu/agent-cage/pull/1",
           };
         },
       },
     );
     assert.equal(result.status, "succeeded");
-    const directory = join(cwd, ".codex-cage", "runs", "run-preserve-patch");
+    const directory = join(cwd, ".agent-cage", "runs", "run-preserve-patch");
     const finalPatch = await readFile(join(directory, "final.patch"), "utf8");
     assert.match(finalPatch, /\+export const changed = true/);
     assert.equal(await readFile(join(directory, "changes-1.patch"), "utf8"), finalPatch);
@@ -1033,7 +1033,7 @@ test("runCodexCage preserves accepted changes before the publisher commits the w
   }
 });
 
-test("runCodexCage records verify failure after max iterations", async () => {
+test("runAgentCage records verify failure after max iterations", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
@@ -1050,7 +1050,7 @@ agent:
   );
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       {
         cwd,
         issueUrl: issue.url,
@@ -1064,8 +1064,8 @@ agent:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,
@@ -1089,7 +1089,7 @@ agent:
     assert.equal(details.phases.at(-1)?.status, "failed");
 
     const replay = await replayRunEventJournal(
-      join(cwd, ".codex-cage", "runs", "run-test-failed", "events.ndjson"),
+      join(cwd, ".agent-cage", "runs", "run-test-failed", "events.ndjson"),
     );
     assert.equal(replay.status, "failed");
     assert.equal(replay.failureCode, "verify_failed");
@@ -1106,7 +1106,7 @@ agent:
   }
 });
 
-test("runCodexCage records retries as distinct canonical Stage Attempts", async () => {
+test("runAgentCage records retries as distinct canonical Stage Attempts", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
@@ -1136,7 +1136,7 @@ agent:
   };
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       { cwd, issueUrl: issue.url },
       {
         executionMode: "docker",
@@ -1147,25 +1147,25 @@ agent:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(sandboxEvents),
         createShellRunner: () => shell,
         runIndependentReview: async () => passingReview(),
         publishSuccessfulRun: async (input) => ({
-          branchName: input.branchName ?? "codex-cage/retry",
+          branchName: input.branchName ?? "agent-cage/retry",
           commitMessage: "retry succeeded",
           prTitle: "retry succeeded",
           prBody: "body",
-          prUrl: "https://github.com/jhowliu/codex-cage/pull/105",
+          prUrl: "https://github.com/jhowliu/agent-cage/pull/105",
         }),
       },
     );
 
     assert.equal(result.status, "succeeded");
     const replay = await replayRunEventJournal(
-      join(cwd, ".codex-cage", "runs", "run-retry-events", "events.ndjson"),
+      join(cwd, ".agent-cage", "runs", "run-retry-events", "events.ndjson"),
     );
     const events = await readRunEvents(cwd, "run-retry-events");
 
@@ -1202,8 +1202,8 @@ type ReplayableFailureScenario = {
   failureCode: FailureCode;
   failedStage: CanonicalStage;
   shell: () => ReturnType<typeof shellRunner>;
-  review?: NonNullable<RunCodexCageDependencies["runIndependentReview"]>;
-  publish?: NonNullable<RunCodexCageDependencies["publishSuccessfulRun"]>;
+  review?: NonNullable<RunAgentCageDependencies["runIndependentReview"]>;
+  publish?: NonNullable<RunAgentCageDependencies["publishSuccessfulRun"]>;
 };
 
 const replayableFailureScenarios: readonly ReplayableFailureScenario[] = [
@@ -1339,13 +1339,13 @@ agent:
 ];
 
 for (const scenario of replayableFailureScenarios) {
-  test(`runCodexCage writes a replayable terminal history for ${scenario.name}`, async () => {
+  test(`runAgentCage writes a replayable terminal history for ${scenario.name}`, async () => {
     const cwd = await createProject(scenario.config);
     const sandboxEvents: string[] = [];
     const shell = scenario.shell();
 
     try {
-      const result = await runCodexCage(
+      const result = await runAgentCage(
         { cwd, issueUrl: issue.url },
         {
           executionMode: "docker",
@@ -1356,8 +1356,8 @@ for (const scenario of replayableFailureScenarios) {
           resolveTargetRepo: async () => repoResolution,
           createAuthenticatedRepo: () => ({
             repo,
-            cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-            redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+            cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+            redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
           }),
           createDockerSandbox: () => fakeSandbox(sandboxEvents),
           createShellRunner: () => shell,
@@ -1365,11 +1365,11 @@ for (const scenario of replayableFailureScenarios) {
           publishSuccessfulRun:
             scenario.publish ??
             (async (input) => ({
-              branchName: input.branchName ?? "codex-cage/unused",
+              branchName: input.branchName ?? "agent-cage/unused",
               commitMessage: "unused",
               prTitle: "unused",
               prBody: "unused",
-              prUrl: "https://github.com/jhowliu/codex-cage/pull/unused",
+              prUrl: "https://github.com/jhowliu/agent-cage/pull/unused",
             })),
         },
       );
@@ -1377,7 +1377,7 @@ for (const scenario of replayableFailureScenarios) {
       assert.equal(result.status, "failed");
       assert.equal(result.failureCode, scenario.failureCode);
 
-      const eventPath = join(cwd, ".codex-cage", "runs", scenario.runId, "events.ndjson");
+      const eventPath = join(cwd, ".agent-cage", "runs", scenario.runId, "events.ndjson");
       const eventText = await readFile(eventPath, "utf8");
       const events = await readRunEvents(cwd, scenario.runId);
       const replay = await replayRunEventJournal(eventPath);
@@ -1430,7 +1430,7 @@ for (const scenario of replayableFailureScenarios) {
   });
 }
 
-test("runCodexCage implements with Claude and reviews with Codex using scoped credentials", async () => {
+test("runAgentCage implements with Claude and reviews with Codex using scoped credentials", async () => {
   const cwd = await createProject(`
 verify:
   - npm test
@@ -1467,7 +1467,7 @@ agent:
   );
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       { cwd, issueUrl: issue.url, model: "claude-sonnet-5-5" },
       {
         executionMode: "docker",
@@ -1484,17 +1484,17 @@ agent:
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,
         publishSuccessfulRun: async (input) => ({
-          branchName: input.branchName ?? "codex-cage/gh-26-run-claude",
+          branchName: input.branchName ?? "agent-cage/gh-26-run-claude",
           commitMessage: "#26 Wire run command",
           prTitle: "#26 Wire run command",
           prBody: "body",
-          prUrl: "https://github.com/jhowliu/codex-cage/pull/26",
+          prUrl: "https://github.com/jhowliu/agent-cage/pull/26",
         }),
       },
     );
@@ -1523,7 +1523,7 @@ agent:
     });
 
     const implementationPrompt = await readFile(
-      join(cwd, ".codex-cage", "runs", "run-claude-123", "implementation-prompt-1.md"),
+      join(cwd, ".agent-cage", "runs", "run-claude-123", "implementation-prompt-1.md"),
       "utf8",
     );
     assert.match(implementationPrompt, /AGENTS\.md and CLAUDE\.md/);
@@ -1547,7 +1547,7 @@ async function runFailingCase(input: {
   const shell = shellRunner(new Map(input.results));
 
   try {
-    const result = await runCodexCage(
+    const result = await runAgentCage(
       { cwd, issueUrl: issue.url },
       {
         executionMode: "docker",
@@ -1558,8 +1558,8 @@ async function runFailingCase(input: {
         resolveTargetRepo: async () => repoResolution,
         createAuthenticatedRepo: () => ({
           repo,
-          cloneUrl: "https://github.com/jhowliu/codex-cage.git",
-          redactedCloneUrl: "https://github.com/jhowliu/codex-cage.git",
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
         }),
         createDockerSandbox: () => fakeSandbox(events),
         createShellRunner: () => shell,
@@ -1584,7 +1584,7 @@ const passingDiff: [string, CommandResult] = [
 `),
 ];
 
-test("runCodexCage reports a missing base branch as clone_failed", async () => {
+test("runAgentCage reports a missing base branch as clone_failed", async () => {
   const outcome = await runFailingCase({
     config: "verify:\n  - npm test\n",
     runId: "run-test-clone",
@@ -1599,7 +1599,7 @@ test("runCodexCage reports a missing base branch as clone_failed", async () => {
   assert.deepEqual(outcome, { failureCode: "clone_failed", lastPhase: "cloning" });
 });
 
-test("runCodexCage reports a rejected Claude token as agent_auth_failed", async () => {
+test("runAgentCage reports a rejected Claude token as agent_auth_failed", async () => {
   const outcome = await runFailingCase({
     config: "verify:\n  - npm test\nagent:\n  implement:\n    provider: claude\n",
     runId: "run-test-claude-auth",
@@ -1612,7 +1612,7 @@ test("runCodexCage reports a rejected Claude token as agent_auth_failed", async 
   assert.deepEqual(outcome, { failureCode: "agent_auth_failed", lastPhase: "implement" });
 });
 
-test("runCodexCage reports other implementation errors as implement_failed", async () => {
+test("runAgentCage reports other implementation errors as implement_failed", async () => {
   const outcome = await runFailingCase({
     config: "verify:\n  - npm test\n",
     runId: "run-test-implement",
@@ -1625,7 +1625,7 @@ test("runCodexCage reports other implementation errors as implement_failed", asy
   assert.deepEqual(outcome, { failureCode: "implement_failed", lastPhase: "implement" });
 });
 
-test("runCodexCage reports an unsupported review model as agent_model_unavailable", async () => {
+test("runAgentCage reports an unsupported review model as agent_model_unavailable", async () => {
   const outcome = await runFailingCase({
     config: "verify:\n  - npm test\n",
     runId: "run-test-review-model",

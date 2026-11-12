@@ -5,7 +5,7 @@ import {
   hasComposeServices,
   type ComposeProject,
 } from "./compose.js";
-import type { CodexCageConfig, ExecutionMode } from "./config.js";
+import type { AgentCageConfig, ExecutionMode } from "./config.js";
 import type { CommandCredentialIntent, RunCredentials } from "./credentials.js";
 import {
   buildRuntimeImage,
@@ -51,7 +51,7 @@ import type { FailureCode, PhaseName, RunStore } from "./state.js";
 
 export type { ShellRunner } from "./sandbox-execution.js";
 
-export type RunCodexCageResult = {
+export type RunAgentCageResult = {
   runId: string;
   status: "succeeded" | "failed";
   failureCode: FailureCode | null;
@@ -90,7 +90,7 @@ export type RunProgressEvent =
 
 export type RuntimeContext = {
   cwd: string;
-  config: CodexCageConfig;
+  config: AgentCageConfig;
   configWarnings: string[];
   credentials: RunCredentials;
   issue: IssueContext;
@@ -127,7 +127,7 @@ export type RunWorkflowInput = {
   onEvent?: RunEventSink;
 };
 
-export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCageResult> {
+export async function runWorkflow(input: RunWorkflowInput): Promise<RunAgentCageResult> {
   const context = input.context;
   const createSandbox = input.createDockerSandbox ?? createDockerSandbox;
   const buildImage = input.buildRuntimeImage ?? buildRuntimeImage;
@@ -265,7 +265,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunCodexCage
     }
     await journal.recordFailure(failureCode, error);
 
-    const runResult: RunCodexCageResult = {
+    const runResult: RunAgentCageResult = {
       runId: context.runId,
       status: "failed",
       failureCode,
@@ -305,7 +305,7 @@ async function provisionDockerSandbox(input: {
         const result = await input.buildImage({
           runId: context.runId,
           dockerfilePath: resolve(context.cwd, runtimeDockerfile),
-          contextPath: resolve(context.cwd, ".codex-cage"),
+          contextPath: resolve(context.cwd, ".agent-cage"),
         });
 
         return {
@@ -468,7 +468,7 @@ async function runImplementationLoop(input: {
   redactor: (input: string) => string;
   review: typeof runIndependentReview;
   publish: typeof publishSuccessfulRun;
-}): Promise<RunCodexCageResult> {
+}): Promise<RunAgentCageResult> {
   const feedback: string[] = [];
   let reviewCycle = 0;
   let guardAttempt = 0;

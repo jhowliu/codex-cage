@@ -248,8 +248,8 @@ test("mergeCredentialEnv layers repo values over the global agent credentials", 
 });
 
 test("globalCredentialsPath follows XDG_CONFIG_HOME", () => {
-  assert.equal(globalCredentialsPath({ XDG_CONFIG_HOME: "/xdg" }), "/xdg/codex-cage/env");
-  assert.match(globalCredentialsPath({}), /\/\.config\/codex-cage\/env$/);
+  assert.equal(globalCredentialsPath({ XDG_CONFIG_HOME: "/xdg" }), "/xdg/agent-cage/env");
+  assert.match(globalCredentialsPath({}), /\/\.config\/agent-cage\/env$/);
 });
 
 test("prepareRunCredentials takes GITHUB_TOKEN from the pinned gh account", async () => {
@@ -259,7 +259,7 @@ test("prepareRunCredentials takes GITHUB_TOKEN from the pinned gh account", asyn
     agents: codexAgents,
     readEnv: async () => ({
       OPENAI_API_KEY: "openai-secret",
-      CODEX_CAGE_GH_USER: "work-account",
+      AGENT_CAGE_GH_USER: "work-account",
       APP_ENV: "test",
     }),
     findCodexAuthFile: async () => null,
@@ -277,7 +277,7 @@ test("prepareRunCredentials takes GITHUB_TOKEN from the pinned gh account", asyn
   });
   // The account name is a setting: it is neither passed to commands nor redacted.
   assert.deepEqual(credentials.command("setup").env, { APP_ENV: "test" });
-  assert.equal("CODEX_CAGE_GH_USER" in credentials.injectedSecrets(), false);
+  assert.equal("AGENT_CAGE_GH_USER" in credentials.injectedSecrets(), false);
   assert.equal(
     credentials.redactor()("work-account gh-token"),
     "work-account [REDACTED:GITHUB_TOKEN]",
@@ -306,7 +306,7 @@ test("prepareRunCredentials fails when the pinned gh account has no token", asyn
     prepareRunCredentials({
       cwd: "/repo",
       agents: codexAgents,
-      readEnv: async () => ({ CODEX_CAGE_GH_USER: "work-account" }),
+      readEnv: async () => ({ AGENT_CAGE_GH_USER: "work-account" }),
       findCodexAuthFile: async () => null,
       findGithubToken: async () => null,
     }),
@@ -319,10 +319,10 @@ test("prepareRunCredentials rejects a gh account that is not a GitHub login", as
     prepareRunCredentials({
       cwd: "/repo",
       agents: codexAgents,
-      readEnv: async () => ({ CODEX_CAGE_GH_USER: "not a login" }),
+      readEnv: async () => ({ AGENT_CAGE_GH_USER: "not a login" }),
       findCodexAuthFile: async () => null,
       findGithubToken: async () => "gh-token",
     }),
-    /CODEX_CAGE_GH_USER in \.codex-cage\.env must be a GitHub login/,
+    /AGENT_CAGE_GH_USER in \.agent-cage\.env must be a GitHub login/,
   );
 });

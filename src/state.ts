@@ -14,9 +14,9 @@ type Row = Record<string, SQLOutputValue>;
 // Run writes are a few small statements per phase, so contention is brief.
 const busyTimeoutMs = 5_000;
 
-export const stateDirectoryName = ".codex-cage";
+export const stateDirectoryName = ".agent-cage";
 export const runsDirectoryName = "runs";
-export const databaseFileName = "codex-cage.sqlite";
+export const databaseFileName = "agent-cage.sqlite";
 
 export const runStatuses = [
   "queued",

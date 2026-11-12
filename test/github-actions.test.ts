@@ -34,7 +34,7 @@ function generate(input: Partial<GitHubActionsWorkflowInput> = {}): {
   workflow: Workflow;
 } {
   const yaml = generateGitHubActionsWorkflow({
-    codexCageVersion: "1.2.3",
+    agentCageVersion: "1.2.3",
     ...input,
   });
   return { yaml, workflow: parse(yaml) as Workflow };
@@ -51,7 +51,7 @@ test("generates a parseable issue-label and dispatch workflow for the target che
 
   assert.deepEqual(workflow.on.issues, { types: ["labeled"] });
   assert.ok(workflow.on.workflow_dispatch);
-  assert.equal(workflow.jobs.run.env.CODEX_CAGE_EXECUTION, "direct");
+  assert.equal(workflow.jobs.run.env.AGENT_CAGE_EXECUTION, "direct");
   assert.match(String(workflow.jobs.run.concurrency.group), /issue/);
   assert.equal(workflow.jobs.run.concurrency["cancel-in-progress"], false);
   assert.equal(workflow.jobs.run["timeout-minutes"], 90);
@@ -60,30 +60,30 @@ test("generates a parseable issue-label and dispatch workflow for the target che
     uses: "actions/checkout@v4",
   });
   assert.equal(
-    step(workflow, "Install Codex Cage and agent CLIs").run,
-    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@openai/codex@0.167.0"',
+    step(workflow, "Install Agent Cage and agent CLIs").run,
+    'npm install --global --no-audit --no-fund "agent-cage@1.2.3" "@openai/codex@0.167.0"',
   );
 });
 
 test("scopes credentials to credential and issue-management steps", () => {
   const { workflow } = generate();
   const job = workflow.jobs.run;
-  const credentialStep = step(workflow, "Write Codex Cage credentials");
-  const cleanupStep = step(workflow, "Remove Codex Cage credentials");
+  const credentialStep = step(workflow, "Write Agent Cage credentials");
+  const cleanupStep = step(workflow, "Remove Agent Cage credentials");
 
   assert.equal(JSON.stringify(job.env).includes("secrets."), false);
   assert.match(credentialStep.env?.OPENAI_API_KEY ?? "", /secrets\.OPENAI_API_KEY/);
   assert.match(
-    credentialStep.env?.CODEX_CAGE_GITHUB_TOKEN ?? "",
-    /secrets\.CODEX_CAGE_GITHUB_TOKEN/,
+    credentialStep.env?.AGENT_CAGE_GITHUB_TOKEN ?? "",
+    /secrets\.AGENT_CAGE_GITHUB_TOKEN/,
   );
-  assert.match(credentialStep.run ?? "", /chmod 600 \.codex-cage\.env/);
+  assert.match(credentialStep.run ?? "", /chmod 600 \.agent-cage\.env/);
   assert.equal(cleanupStep.if, "always()");
-  assert.equal(cleanupStep.run, "rm -f .codex-cage.env");
+  assert.equal(cleanupStep.run, "rm -f .agent-cage.env");
 
   for (const candidate of job.steps) {
     const serialized = JSON.stringify(candidate);
-    if (serialized.includes("secrets.CODEX_CAGE_GITHUB_TOKEN")) {
+    if (serialized.includes("secrets.AGENT_CAGE_GITHUB_TOKEN")) {
       assert.match(candidate.name, /credentials|Normalize|Report|Clear/);
     }
   }
@@ -92,10 +92,10 @@ test("scopes credentials to credential and issue-management steps", () => {
 test("normalizes all state labels and reports results and artifacts", () => {
   const { workflow } = generate();
   const expectedLabels = [
-    "codex-cage:run",
-    "codex-cage:in-progress",
-    "codex-cage:ready-for-review",
-    "codex-cage:blocked",
+    "agent-cage:run",
+    "agent-cage:in-progress",
+    "agent-cage:ready-for-review",
+    "agent-cage:blocked",
   ];
 
   for (const name of [
@@ -111,8 +111,8 @@ test("normalizes all state labels and reports results and artifacts", () => {
   assert.match(step(workflow, "Report failure").run ?? "", /failureCode/);
   const artifact = step(workflow, "Upload run artifacts");
   assert.equal(artifact.if, "always()");
-  assert.match(artifact.with?.path ?? "", /codex-cage-result\.json/);
-  assert.match(artifact.with?.path ?? "", /\.codex-cage\/runs/);
+  assert.match(artifact.with?.path ?? "", /agent-cage-result\.json/);
+  assert.match(artifact.with?.path ?? "", /\.agent-cage\/runs/);
 });
 
 test("renders an optional job container and generic services", () => {
@@ -151,11 +151,11 @@ test("renders an optional job container and generic services", () => {
 
 test("rejects versions that are not exact", () => {
   assert.throws(
-    () => generateGitHubActionsWorkflow({ codexCageVersion: "latest" }),
+    () => generateGitHubActionsWorkflow({ agentCageVersion: "latest" }),
     /exact semantic version/,
   );
   assert.throws(
-    () => generateGitHubActionsWorkflow({ codexCageVersion: "^1.2.3" }),
+    () => generateGitHubActionsWorkflow({ agentCageVersion: "^1.2.3" }),
     /exact semantic version/,
   );
 });
@@ -163,11 +163,11 @@ test("rejects versions that are not exact", () => {
 test("installs and authenticates only the configured agent CLIs", () => {
   const { workflow } = generate({ agents: { implement: "claude", review: "codex" } });
   const validate = step(workflow, "Validate credentials");
-  const credentialStep = step(workflow, "Write Codex Cage credentials");
+  const credentialStep = step(workflow, "Write Agent Cage credentials");
 
   assert.equal(
-    step(workflow, "Install Codex Cage and agent CLIs").run,
-    'npm install --global --no-audit --no-fund "codex-cage@1.2.3" "@anthropic-ai/claude-code@2.1.319" "@openai/codex@0.167.0"',
+    step(workflow, "Install Agent Cage and agent CLIs").run,
+    'npm install --global --no-audit --no-fund "agent-cage@1.2.3" "@anthropic-ai/claude-code@2.1.319" "@openai/codex@0.167.0"',
   );
   assert.match(validate.run ?? "", /CLAUDE_CODE_OAUTH_TOKEN.*ANTHROPIC_API_KEY/);
   assert.match(validate.run ?? "", /Missing OPENAI_API_KEY/);
@@ -186,7 +186,7 @@ test("a Claude-only workflow does not require OpenAI credentials", () => {
   const { workflow } = generate({ agents: { implement: "claude", review: "claude" } });
 
   assert.doesNotMatch(
-    step(workflow, "Install Codex Cage and agent CLIs").run ?? "",
+    step(workflow, "Install Agent Cage and agent CLIs").run ?? "",
     /@openai\/codex/,
   );
   assert.doesNotMatch(JSON.stringify(workflow), /OPENAI_API_KEY/);

@@ -33,7 +33,7 @@ function recordingDockerRunner(): DockerRunner & { calls: string[][] } {
 }
 
 test("composeProjectName creates stable per-run project names", () => {
-  assert.equal(composeProjectName("RUN 123/ABC"), "codex-cage-run-123-abc");
+  assert.equal(composeProjectName("RUN 123/ABC"), "agent-cage-run-123-abc");
 });
 
 test("composeBaseArgs scopes compose to project name and project directory", () => {
@@ -45,7 +45,7 @@ test("composeBaseArgs scopes compose to project name and project directory", () 
     }),
     [
       "--project-name",
-      "codex-cage-run-1",
+      "agent-cage-run-1",
       "--project-directory",
       "/workspace",
       "-f",
@@ -71,12 +71,12 @@ test("compose project starts and tears down services with volumes", async () => 
   await project.up();
   await project.down();
 
-  assert.equal(project.projectName, "codex-cage-run-1");
-  assert.equal(project.networkName, "codex-cage-run-1_default");
+  assert.equal(project.projectName, "agent-cage-run-1");
+  assert.equal(project.networkName, "agent-cage-run-1_default");
   assert.deepEqual(runner.calls, [
     [
       "--project-name",
-      "codex-cage-run-1",
+      "agent-cage-run-1",
       "--project-directory",
       "/workspace",
       "-f",
@@ -86,7 +86,7 @@ test("compose project starts and tears down services with volumes", async () => 
     ],
     [
       "--project-name",
-      "codex-cage-run-1",
+      "agent-cage-run-1",
       "--project-directory",
       "/workspace",
       "-f",
@@ -115,7 +115,7 @@ test("compose readiness commands run on compose network without Docker socket or
   assert.equal(readyArgs.includes("--network"), true);
   assert.equal(
     readyArgs.at(readyArgs.indexOf("--network") + 1),
-    "codex-cage-run-1_default",
+    "agent-cage-run-1_default",
   );
   assert.equal(readyArgs.includes("--publish"), false);
   assert.equal(readyArgs.includes("-p"), false);
@@ -127,8 +127,8 @@ test("compose readiness commands run on compose network without Docker socket or
 
 test("readyCommandRunArgs is explicit about the no-workspace readiness container", () => {
   const args = readyCommandRunArgs({
-    image: "codex-cage/base:0.1.0",
-    networkName: "codex-cage-run-1_default",
+    image: "agent-cage/base:0.1.0",
+    networkName: "agent-cage-run-1_default",
     runId: "run-1",
     command: "redis-cli -h redis ping",
   });

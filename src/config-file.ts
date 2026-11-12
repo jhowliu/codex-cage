@@ -3,12 +3,12 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { Document, parseDocument } from "yaml";
 import {
-  parseCodexCageConfig,
-  type CodexCageConfig,
+  parseAgentCageConfig,
+  type AgentCageConfig,
   type ConfigParseResult,
 } from "./config.js";
 
-export const CODEX_CAGE_CONFIG_FILE = ".codex-cage.yml";
+export const AGENT_CAGE_CONFIG_FILE = ".agent-cage.yml";
 
 export const managedConfigKeys = [
   "setup",
@@ -27,8 +27,8 @@ export const managedConfigKeys = [
 
 export type ManagedConfigKey = (typeof managedConfigKeys)[number];
 
-export type CodexCageConfigUpdates = {
-  readonly [Key in ManagedConfigKey]?: Exclude<CodexCageConfig[Key], undefined>;
+export type AgentCageConfigUpdates = {
+  readonly [Key in ManagedConfigKey]?: Exclude<AgentCageConfig[Key], undefined>;
 };
 
 export type MissingConfigFile = {
@@ -49,12 +49,12 @@ export type InvalidConfigFile = {
   errors: readonly Error[];
 };
 
-export type CodexCageConfigFile = MissingConfigFile | ValidConfigFile | InvalidConfigFile;
+export type AgentCageConfigFile = MissingConfigFile | ValidConfigFile | InvalidConfigFile;
 
 export type WritableConfigFile = MissingConfigFile | ValidConfigFile;
 
-export async function loadCodexCageConfigFile(cwd: string): Promise<CodexCageConfigFile> {
-  const path = join(cwd, CODEX_CAGE_CONFIG_FILE);
+export async function loadAgentCageConfigFile(cwd: string): Promise<AgentCageConfigFile> {
+  const path = join(cwd, AGENT_CAGE_CONFIG_FILE);
   const source = await readOptionalFile(path);
   if (source === undefined) {
     return { status: "missing", path };
@@ -66,16 +66,16 @@ export async function loadCodexCageConfigFile(cwd: string): Promise<CodexCageCon
   }
 
   try {
-    const result = parseCodexCageConfig(document.toJS());
+    const result = parseAgentCageConfig(document.toJS());
     return { status: "valid", path, document, ...result };
   } catch (error) {
     return { status: "invalid", path, document, errors: [toError(error)] };
   }
 }
 
-export async function updateCodexCageConfigFile(
+export async function updateAgentCageConfigFile(
   state: WritableConfigFile,
-  updates: CodexCageConfigUpdates,
+  updates: AgentCageConfigUpdates,
 ): Promise<ValidConfigFile> {
   const document = state.status === "valid" ? state.document.clone() : new Document({});
 
@@ -86,7 +86,7 @@ export async function updateCodexCageConfigFile(
     }
   }
 
-  const result = parseCodexCageConfig(document.toJS());
+  const result = parseAgentCageConfig(document.toJS());
   await atomicWrite(state.path, document.toString());
 
   return { status: "valid", path: state.path, document, ...result };

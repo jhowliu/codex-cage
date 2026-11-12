@@ -49,7 +49,7 @@ test("buildReviewPrompt includes read-only instructions and required context", (
     diff: "diff --git a/src/app.ts b/src/app.ts",
     verificationSummary: "npm test passed",
     reviewPolicyStatus:
-      "Target review policy: present at /workspace/.codex-cage/review-policy.md.",
+      "Target review policy: present at /workspace/.agent-cage/review-policy.md.",
     resultMetadata: {
       runId: "run-1",
       verify: ["npm test"],

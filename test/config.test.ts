@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  codexCageConfigSchema,
-  parseCodexCageConfig,
+  agentCageConfigSchema,
+  parseAgentCageConfig,
   resolveExecutionMode,
 } from "../src/config.js";
 import { defaultSandboxImage } from "../src/docker.js";
 
 test("config schema accepts a minimal valid config", () => {
-  const config = codexCageConfigSchema.parse({
+  const config = agentCageConfigSchema.parse({
     verify: ["npm test"],
   });
 
@@ -22,11 +22,11 @@ test("config schema accepts a minimal valid config", () => {
     dockerfile: null,
   });
   assert.equal(config.actions.enabled, false);
-  assert.equal(config.actions.workflow, ".github/workflows/codex-cage.yml");
+  assert.equal(config.actions.workflow, ".github/workflows/agent-cage.yml");
 });
 
 test("config schema rejects empty verify commands", () => {
-  const result = codexCageConfigSchema.safeParse({ verify: [] });
+  const result = agentCageConfigSchema.safeParse({ verify: [] });
 
   assert.equal(result.success, false);
   assert.ok(
@@ -37,22 +37,22 @@ test("config schema rejects empty verify commands", () => {
 });
 
 test("config schema accepts explicit runtime image and Dockerfile", () => {
-  const config = codexCageConfigSchema.parse({
+  const config = agentCageConfigSchema.parse({
     verify: ["npm test"],
     runtime: {
-      image: "registry.example.com/codex-cage/base:custom",
-      dockerfile: ".codex-cage/Dockerfile",
+      image: "registry.example.com/agent-cage/base:custom",
+      dockerfile: ".agent-cage/Dockerfile",
     },
   });
 
   assert.deepEqual(config.runtime, {
-    image: "registry.example.com/codex-cage/base:custom",
-    dockerfile: ".codex-cage/Dockerfile",
+    image: "registry.example.com/agent-cage/base:custom",
+    dockerfile: ".agent-cage/Dockerfile",
   });
 });
 
 test("config schema preserves unknown keys for forward compatibility", () => {
-  const result = parseCodexCageConfig({
+  const result = parseAgentCageConfig({
     verify: ["npm test"],
     future_option: true,
   });
@@ -76,7 +76,7 @@ test("execution mode reads from config when no env override", () => {
 test("execution mode env overrides config", () => {
   assert.equal(
     resolveExecutionMode({
-      env: { CODEX_CAGE_EXECUTION: "direct" },
+      env: { AGENT_CAGE_EXECUTION: "direct" },
       config: { execution: "docker" },
     }),
     "direct",
@@ -86,7 +86,7 @@ test("execution mode env overrides config", () => {
 test("execution mode ignores empty env value and falls back", () => {
   assert.equal(
     resolveExecutionMode({
-      env: { CODEX_CAGE_EXECUTION: "" },
+      env: { AGENT_CAGE_EXECUTION: "" },
       config: { execution: "direct" },
     }),
     "direct",
@@ -95,13 +95,13 @@ test("execution mode ignores empty env value and falls back", () => {
 
 test("execution mode rejects an invalid env value", () => {
   assert.throws(
-    () => resolveExecutionMode({ env: { CODEX_CAGE_EXECUTION: "vm" } }),
+    () => resolveExecutionMode({ env: { AGENT_CAGE_EXECUTION: "vm" } }),
     /must be "docker" or "direct"/,
   );
 });
 
 test("config schema accepts an explicit execution mode", () => {
-  const config = codexCageConfigSchema.parse({
+  const config = agentCageConfigSchema.parse({
     verify: ["npm test"],
     execution: "direct",
   });
@@ -110,11 +110,11 @@ test("config schema accepts an explicit execution mode", () => {
 });
 
 test("config schema accepts GitHub Actions settings", () => {
-  const config = codexCageConfigSchema.parse({
+  const config = agentCageConfigSchema.parse({
     verify: ["npm test"],
     actions: {
       enabled: true,
-      codex_cage_version: "0.1.0",
+      agent_cage_version: "0.1.0",
       services: {
         postgres: {
           image: "postgres:17",
@@ -132,7 +132,7 @@ test("config schema accepts GitHub Actions settings", () => {
 test("config schema requires a pinned version when Actions is enabled", () => {
   assert.throws(
     () =>
-      codexCageConfigSchema.parse({
+      agentCageConfigSchema.parse({
         verify: ["npm test"],
         actions: { enabled: true },
       }),
@@ -141,7 +141,7 @@ test("config schema requires a pinned version when Actions is enabled", () => {
 });
 
 test("agents default to Codex for both roles", () => {
-  const config = codexCageConfigSchema.parse({ verify: ["npm test"] });
+  const config = agentCageConfigSchema.parse({ verify: ["npm test"] });
 
   assert.deepEqual(config.agent, {
     implement: { provider: "codex", model: "gpt-5.4-mini" },
@@ -152,7 +152,7 @@ test("agents default to Codex for both roles", () => {
 });
 
 test("legacy agent.model applies to every Codex role", () => {
-  const config = codexCageConfigSchema.parse({
+  const config = agentCageConfigSchema.parse({
     verify: ["npm test"],
     agent: { model: "gpt-5.4", max_iterations: 3 },
   });
@@ -163,7 +163,7 @@ test("legacy agent.model applies to every Codex role", () => {
 });
 
 test("agent roles pick a provider default model unless one is configured", () => {
-  const config = codexCageConfigSchema.parse({
+  const config = agentCageConfigSchema.parse({
     verify: ["npm test"],
     agent: {
       model: "gpt-5.4",
@@ -180,13 +180,13 @@ test("agent roles pick a provider default model unless one is configured", () =>
 });
 
 test("resolved agent config round-trips through the schema", () => {
-  const resolved = codexCageConfigSchema.parse({
+  const resolved = agentCageConfigSchema.parse({
     verify: ["npm test"],
     agent: { implement: { provider: "claude", model: "claude-sonnet-5-5" } },
   });
 
   assert.deepEqual(
-    codexCageConfigSchema.parse({ verify: ["npm test"], agent: resolved.agent }).agent,
+    agentCageConfigSchema.parse({ verify: ["npm test"], agent: resolved.agent }).agent,
     resolved.agent,
   );
 });
@@ -194,7 +194,7 @@ test("resolved agent config round-trips through the schema", () => {
 test("config schema rejects unknown agent providers", () => {
   assert.throws(
     () =>
-      codexCageConfigSchema.parse({
+      agentCageConfigSchema.parse({
         verify: ["npm test"],
         agent: { implement: { provider: "gemini" } },
       }),

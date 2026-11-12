@@ -5,24 +5,24 @@ import { join } from "node:path";
 import test from "node:test";
 import { Document } from "yaml";
 import {
-  CODEX_CAGE_CONFIG_FILE,
-  loadCodexCageConfigFile,
-  updateCodexCageConfigFile,
+  AGENT_CAGE_CONFIG_FILE,
+  loadAgentCageConfigFile,
+  updateAgentCageConfigFile,
 } from "../src/config-file.js";
 
 async function tempRepo(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "codex-cage-config-file-"));
+  return await mkdtemp(join(tmpdir(), "agent-cage-config-file-"));
 }
 
 test("load reports a missing optional config", async () => {
   const cwd = await tempRepo();
 
   try {
-    const state = await loadCodexCageConfigFile(cwd);
+    const state = await loadAgentCageConfigFile(cwd);
 
     assert.deepEqual(state, {
       status: "missing",
-      path: join(cwd, CODEX_CAGE_CONFIG_FILE),
+      path: join(cwd, AGENT_CAGE_CONFIG_FILE),
     });
   } finally {
     await rm(cwd, { recursive: true, force: true });
@@ -34,12 +34,12 @@ test("load returns the YAML document and parsed valid config", async () => {
 
   try {
     await writeFile(
-      join(cwd, CODEX_CAGE_CONFIG_FILE),
+      join(cwd, AGENT_CAGE_CONFIG_FILE),
       "# project config\nverify:\n  - npm test\nfuture_option: true\n",
       "utf8",
     );
 
-    const state = await loadCodexCageConfigFile(cwd);
+    const state = await loadAgentCageConfigFile(cwd);
 
     assert.equal(state.status, "valid");
     assert.ok(state.document instanceof Document);
@@ -54,16 +54,16 @@ test("load returns the YAML document and parsed valid config", async () => {
 
 test("load distinguishes YAML and config validation failures", async () => {
   const cwd = await tempRepo();
-  const path = join(cwd, CODEX_CAGE_CONFIG_FILE);
+  const path = join(cwd, AGENT_CAGE_CONFIG_FILE);
 
   try {
     await writeFile(path, "verify: [unterminated\n", "utf8");
-    const malformed = await loadCodexCageConfigFile(cwd);
+    const malformed = await loadAgentCageConfigFile(cwd);
     assert.equal(malformed.status, "invalid");
     assert.ok(malformed.errors.length > 0);
 
     await writeFile(path, "verify: []\n", "utf8");
-    const schemaInvalid = await loadCodexCageConfigFile(cwd);
+    const schemaInvalid = await loadAgentCageConfigFile(cwd);
     assert.equal(schemaInvalid.status, "invalid");
     assert.ok(schemaInvalid.errors.length > 0);
   } finally {
@@ -73,7 +73,7 @@ test("load distinguishes YAML and config validation failures", async () => {
 
 test("update changes only supplied managed keys and preserves comments and unknown keys", async () => {
   const cwd = await tempRepo();
-  const path = join(cwd, CODEX_CAGE_CONFIG_FILE);
+  const path = join(cwd, AGENT_CAGE_CONFIG_FILE);
 
   try {
     await writeFile(
@@ -90,10 +90,10 @@ test("update changes only supplied managed keys and preserves comments and unkno
       ].join("\n"),
       "utf8",
     );
-    const state = await loadCodexCageConfigFile(cwd);
+    const state = await loadAgentCageConfigFile(cwd);
     assert.equal(state.status, "valid");
 
-    const updated = await updateCodexCageConfigFile(state, {
+    const updated = await updateAgentCageConfigFile(state, {
       setup: ["npm install"],
     });
     const source = await readFile(path, "utf8");
@@ -104,7 +104,7 @@ test("update changes only supplied managed keys and preserves comments and unkno
     assert.match(source, /# keep this project note/);
     assert.match(source, /# owned by a future version/);
     assert.match(source, /future_option: true # keep inline note/);
-    assert.deepEqual(await readdir(cwd), [CODEX_CAGE_CONFIG_FILE]);
+    assert.deepEqual(await readdir(cwd), [AGENT_CAGE_CONFIG_FILE]);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
@@ -114,18 +114,18 @@ test("update validates before creating a missing config", async () => {
   const cwd = await tempRepo();
 
   try {
-    const missing = await loadCodexCageConfigFile(cwd);
+    const missing = await loadAgentCageConfigFile(cwd);
     assert.equal(missing.status, "missing");
 
-    await assert.rejects(() => updateCodexCageConfigFile(missing, { setup: [] }));
+    await assert.rejects(() => updateAgentCageConfigFile(missing, { setup: [] }));
     assert.deepEqual(await readdir(cwd), []);
 
-    const created = await updateCodexCageConfigFile(missing, {
+    const created = await updateAgentCageConfigFile(missing, {
       verify: ["npm test"],
     });
     assert.equal(created.status, "valid");
     assert.deepEqual(created.config.verify, ["npm test"]);
-    assert.deepEqual(await readdir(cwd), [CODEX_CAGE_CONFIG_FILE]);
+    assert.deepEqual(await readdir(cwd), [AGENT_CAGE_CONFIG_FILE]);
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

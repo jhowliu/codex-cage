@@ -261,7 +261,7 @@ function RepositoryInlineDetails({
         label="Source"
         value={repository.fullName === null ? "Local" : "GitHub"}
       />
-      <RepositoryDetail label="Runner config" value=".codex-cage.yml" mono />
+      <RepositoryDetail label="Runner config" value=".agent-cage.yml" mono />
       <RepositoryDetail
         label="Policy status"
         value={repository.status === "ready" ? "Ready" : "Review required"}

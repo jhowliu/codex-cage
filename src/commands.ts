@@ -5,7 +5,7 @@ import { checkIssue, type IssueCheckResult } from "./check.js";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { createControlRoomServer } from "./control-room.js";
 import { doctorProject, type DoctorResult } from "./doctor.js";
-import { runCodexCage, type RunCodexCageResult, type RunProgressEvent } from "./run.js";
+import { runAgentCage, type RunAgentCageResult, type RunProgressEvent } from "./run.js";
 import { RunFailureError } from "./run/errors.js";
 import { setupProject, type SetupResult } from "./setup.js";
 import {
@@ -16,23 +16,23 @@ import {
 } from "./state.js";
 import { readPackageVersion } from "./version.js";
 
-export const RESULT_FILE_ENV = "CODEX_CAGE_RESULT_FILE";
-export const VERBOSE_ENV = "CODEX_CAGE_VERBOSE";
+export const RESULT_FILE_ENV = "AGENT_CAGE_RESULT_FILE";
+export const VERBOSE_ENV = "AGENT_CAGE_VERBOSE";
 
 export type CliDependencies = {
-  runCodexCage?: typeof runCodexCage;
+  runAgentCage?: typeof runAgentCage;
   setupProject?: typeof setupProject;
   doctorProject?: typeof doctorProject;
 };
 
 export function createCli(dependencies: CliDependencies = {}): Command {
   const program = new Command();
-  const run = dependencies.runCodexCage ?? runCodexCage;
+  const run = dependencies.runAgentCage ?? runAgentCage;
   const setup = dependencies.setupProject ?? setupProject;
   const doctor = dependencies.doctorProject ?? doctorProject;
 
   program
-    .name("codex-cage")
+    .name("agent-cage")
     .description(
       "Run Codex in an isolated Docker workspace and publish verified PRs from issue links.",
     )
@@ -77,7 +77,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
   program
     .command("doctor")
-    .description("Check local and GitHub Actions Codex Cage configuration.")
+    .description("Check local and GitHub Actions Agent Cage configuration.")
     .option("--json", "print the machine-readable diagnostic result")
     .option(
       "--probe",
@@ -97,7 +97,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
   program
     .command("check")
-    .description("Check whether an issue is ready for a Codex Cage run.")
+    .description("Check whether an issue is ready for a Agent Cage run.")
     .argument("<issue-url>", "GitHub or Linear issue URL")
     .option("--json", "print the machine-readable check result")
     .action(async (issueUrl: string, options: { json?: boolean }) => {
@@ -112,7 +112,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
   program
     .command("run")
-    .description("Run Codex Cage for a GitHub or Linear issue URL.")
+    .description("Run Agent Cage for a GitHub or Linear issue URL.")
     .argument("<issue-url>", "GitHub or Linear issue URL")
     .option("--repo <repo>", "target GitHub repository override")
     .option("--base <branch>", "base branch override")
@@ -150,7 +150,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         }
 
         const verbose = options.verbose === true || process.env[VERBOSE_ENV] === "1";
-        let result: RunCodexCageResult;
+        let result: RunAgentCageResult;
         try {
           result = await run(
             removeUndefinedProperties({
@@ -209,7 +209,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
   program
     .command("control-room")
-    .description("Start the local Codex Cage Control Room.")
+    .description("Start the local Agent Cage Control Room.")
     .option("--host <host>", "bind address", "127.0.0.1")
     .option("--port <port>", "listen port", parsePort)
     .action(async (options: { host: string; port?: number }) => {
@@ -222,7 +222,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
       await waitForShutdown(controlRoom.close);
     });
 
-  const runs = program.command("runs").description("Inspect prior Codex Cage runs.");
+  const runs = program.command("runs").description("Inspect prior Agent Cage runs.");
 
   runs
     .command("list")
@@ -316,7 +316,7 @@ export function createCli(dependencies: CliDependencies = {}): Command {
 
   program
     .command("cleanup")
-    .description("Remove stale Docker resources managed by Codex Cage.")
+    .description("Remove stale Docker resources managed by Agent Cage.")
     .option("--all", "remove all managed Docker resources, including active ones")
     .action(async (options: { all?: boolean }) => {
       const report = await cleanupManagedDockerResources({ all: options.all === true });
@@ -449,9 +449,9 @@ function removeUndefinedProperties<TValue extends Record<string, unknown>>(
 
 async function writeRunResultFile(
   path: string,
-  result: RunCodexCageResult,
+  result: RunAgentCageResult,
 ): Promise<void> {
-  const payload: RunCodexCageResult = {
+  const payload: RunAgentCageResult = {
     runId: result.runId,
     status: result.status,
     failureCode: result.failureCode,

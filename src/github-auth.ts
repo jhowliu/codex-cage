@@ -2,11 +2,11 @@ import { execa } from "execa";
 import { z } from "zod";
 
 /**
- * Repo-local `.codex-cage.env` key that pins the gh account a repo uses when
+ * Repo-local `.agent-cage.env` key that pins the gh account a repo uses when
  * it has no GITHUB_TOKEN. It is a setting, not a secret: it never reaches
  * commands or the secret redactor.
  */
-export const githubAccountEnvName = "CODEX_CAGE_GH_USER";
+export const githubAccountEnvName = "AGENT_CAGE_GH_USER";
 
 const githubHost = "github.com";
 

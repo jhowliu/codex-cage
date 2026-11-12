@@ -99,7 +99,7 @@ export type HostWorkspace = {
  * direct-mode runs, where the runner (not Docker) provides isolation.
  */
 export async function createHostWorkspace(runId: string): Promise<HostWorkspace> {
-  const workspacePath = await mkdtemp(join(tmpdir(), `codex-cage-${runId}-`));
+  const workspacePath = await mkdtemp(join(tmpdir(), `agent-cage-${runId}-`));
 
   return {
     workspacePath,
@@ -128,7 +128,7 @@ export function createDockerShellRunner(
           networkName: sandbox.networkName,
           volumeName: sandbox.volumeName,
           workspacePath: sandbox.workspacePath,
-          labels: { "codex-cage.run_id": sandbox.runId },
+          labels: { "agent-cage.run_id": sandbox.runId },
           env: commandEnv,
           codexAuthFilePath: options.codexAuthFilePath,
           command,

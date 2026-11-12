@@ -12,7 +12,7 @@ import {
   githubAccountSetting,
   type GithubTokenLookup,
 } from "./github-auth.js";
-import { createSecretRedactor, readCodexCageEnv, readEnvFile } from "./guards.js";
+import { createSecretRedactor, readAgentCageEnv, readEnvFile } from "./guards.js";
 import type { CommentSelection, FetchIssueContextOptions } from "./issue.js";
 
 export type CommandCredentialIntent =
@@ -127,7 +127,7 @@ async function withGithubToken(
   const setting = githubAccountSetting(env);
   if (setting.status === "invalid") {
     throw new Error(
-      `${githubAccountEnvName} in .codex-cage.env must be a GitHub login, got "${setting.value}".`,
+      `${githubAccountEnvName} in .agent-cage.env must be a GitHub login, got "${setting.value}".`,
     );
   }
   const secrets = Object.fromEntries(
@@ -140,7 +140,7 @@ async function withGithubToken(
   if (token !== null) return normalizeCredentialEnv({ ...secrets, GITHUB_TOKEN: token });
   if (login !== null) {
     throw new Error(
-      `gh has no github.com token for ${login} (${githubAccountEnvName}); run \`gh auth login\` as ${login} or set GITHUB_TOKEN in .codex-cage.env.`,
+      `gh has no github.com token for ${login} (${githubAccountEnvName}); run \`gh auth login\` as ${login} or set GITHUB_TOKEN in .agent-cage.env.`,
     );
   }
   // No token anywhere: createAuthenticatedRepo reports the missing token.
@@ -232,11 +232,11 @@ export function globalCredentialsPath(
       ? join(homedir(), ".config")
       : env.XDG_CONFIG_HOME;
 
-  return join(configHome, "codex-cage", "env");
+  return join(configHome, "agent-cage", "env");
 }
 
 /**
- * Merges the machine-wide credential file with the repo's `.codex-cage.env`.
+ * Merges the machine-wide credential file with the repo's `.agent-cage.env`.
  * Repo values win per key, and empty placeholders never mask a global value.
  */
 export function mergeCredentialEnv(input: {
@@ -273,13 +273,13 @@ export async function readCredentialEnv(
 ): Promise<CredentialEnv> {
   const [global, repo] = await Promise.all([
     readEnvFile(globalPath),
-    readCodexCageEnv(cwd),
+    readAgentCageEnv(cwd),
   ]);
 
   return mergeCredentialEnv({ global, repo });
 }
 
-/** Default run env: repo `.codex-cage.env` layered over the global file. */
+/** Default run env: repo `.agent-cage.env` layered over the global file. */
 export async function readRunEnv(cwd: string): Promise<Record<string, string>> {
   return (await readCredentialEnv(cwd)).env;
 }

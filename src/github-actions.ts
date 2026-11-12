@@ -20,7 +20,7 @@ export type GitHubActionsRuntime = {
 };
 
 export type GitHubActionsWorkflowInput = {
-  codexCageVersion: string;
+  agentCageVersion: string;
   labels?: Partial<GitHubActionsLabels>;
   name?: string;
   runsOn?: string;
@@ -32,10 +32,10 @@ export type GitHubActionsWorkflowInput = {
 };
 
 const defaultLabels = {
-  run: "codex-cage:run",
-  inProgress: "codex-cage:in-progress",
-  ready: "codex-cage:ready-for-review",
-  blocked: "codex-cage:blocked",
+  run: "agent-cage:run",
+  inProgress: "agent-cage:in-progress",
+  ready: "agent-cage:ready-for-review",
+  blocked: "agent-cage:blocked",
 } satisfies GitHubActionsLabels;
 
 const codexCliVersion = "0.167.0";
@@ -58,7 +58,7 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
   ];
   const agentSecrets = agentSecretNames(providers);
   const managementEnv = {
-    GH_TOKEN: expression("secrets.CODEX_CAGE_GITHUB_TOKEN"),
+    GH_TOKEN: expression("secrets.AGENT_CAGE_GITHUB_TOKEN"),
     ISSUE_NUMBER: issueNumber,
   };
 
@@ -69,15 +69,15 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
     "runs-on": input.runsOn ?? "ubuntu-latest",
     "timeout-minutes": input.timeoutMinutes ?? 90,
     concurrency: {
-      group: `codex-cage-issue-${issueNumber}`,
+      group: `agent-cage-issue-${issueNumber}`,
       "cancel-in-progress": false,
     },
     env: {
-      CODEX_CAGE_EXECUTION: "direct",
+      AGENT_CAGE_EXECUTION: "direct",
       ISSUE_NUMBER: issueNumber,
       ISSUE_URL: issueUrl,
       RUN_URL: runUrl,
-      RESULT_JSON: expression("format('{0}/codex-cage-result.json', runner.temp)"),
+      RESULT_JSON: expression("format('{0}/agent-cage-result.json', runner.temp)"),
     },
     steps: [
       {
@@ -85,7 +85,7 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
         env: credentialStepEnv(agentSecrets),
         run: [
           ...providers.map(agentCredentialCheck),
-          'test -n "$CODEX_CAGE_GITHUB_TOKEN" || { printf "Missing CODEX_CAGE_GITHUB_TOKEN\\n" >&2; exit 1; }',
+          'test -n "$AGENT_CAGE_GITHUB_TOKEN" || { printf "Missing AGENT_CAGE_GITHUB_TOKEN\\n" >&2; exit 1; }',
         ].join("\n"),
       },
       {
@@ -103,25 +103,25 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
         with: { "node-version": "22" },
       },
       {
-        name: "Install Codex Cage and agent CLIs",
+        name: "Install Agent Cage and agent CLIs",
         run: [
           "npm install --global --no-audit --no-fund",
-          `"codex-cage@${input.codexCageVersion}"`,
+          `"agent-cage@${input.agentCageVersion}"`,
           ...providers.map((provider) => `"${agentCliPackage(provider)}"`),
         ].join(" "),
       },
       {
-        name: "Write Codex Cage credentials",
+        name: "Write Agent Cage credentials",
         env: credentialStepEnv(agentSecrets),
         run: [
           "umask 077",
           writeCredentialsCommand(agentSecrets),
-          "chmod 600 .codex-cage.env",
+          "chmod 600 .agent-cage.env",
         ].join("\n"),
       },
       {
-        name: "Run Codex Cage",
-        run: 'codex-cage run "$ISSUE_URL" --verbose --result-json "$RESULT_JSON"',
+        name: "Run Agent Cage",
+        run: 'agent-cage run "$ISSUE_URL" --verbose --result-json "$RESULT_JSON"',
       },
       {
         name: "Report success",
@@ -129,7 +129,7 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
         env: managementEnv,
         run: [
           "PR_URL=$(jq -r '.prUrl // empty' \"$RESULT_JSON\")",
-          'BODY="Codex Cage completed successfully. [View result](${RUN_URL})."',
+          'BODY="Agent Cage completed successfully. [View result](${RUN_URL})."',
           'if [ -n "$PR_URL" ]; then BODY="${BODY} [Open pull request](${PR_URL})."; fi',
           'gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"',
           labelCommand(labels, labels.ready),
@@ -141,9 +141,9 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
         env: managementEnv,
         run: [
           'FAILURE_CODE=$(jq -r \'.failureCode // "unknown"\' "$RESULT_JSON" 2>/dev/null || printf unknown)',
-          'BODY="Codex Cage failed (\\`${FAILURE_CODE}\\`). [View result](${RUN_URL})."',
+          'BODY="Agent Cage failed (\\`${FAILURE_CODE}\\`). [View result](${RUN_URL})."',
           "RUN_ID=$(jq -r '.runId // empty' \"$RESULT_JSON\" 2>/dev/null || true)",
-          'SUMMARY_FILE=".codex-cage/runs/${RUN_ID}/summary.md"',
+          'SUMMARY_FILE=".agent-cage/runs/${RUN_ID}/summary.md"',
           'if [ -n "$RUN_ID" ] && [ -f "$SUMMARY_FILE" ]; then BODY="${BODY}"$\'\\n\\n\'"$(cat "$SUMMARY_FILE")"; fi',
           'gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"',
           labelCommand(labels, labels.blocked),
@@ -154,18 +154,18 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
         if: "always()",
         uses: "actions/upload-artifact@v4",
         with: {
-          name: `codex-cage-run-${issueNumber}`,
+          name: `agent-cage-run-${issueNumber}`,
           path: [
-            ".codex-cage/runs/",
-            expression("runner.temp") + "/codex-cage-result.json",
+            ".agent-cage/runs/",
+            expression("runner.temp") + "/agent-cage-result.json",
           ].join("\n"),
           "if-no-files-found": "ignore",
         },
       },
       {
-        name: "Remove Codex Cage credentials",
+        name: "Remove Agent Cage credentials",
         if: "always()",
-        run: "rm -f .codex-cage.env",
+        run: "rm -f .agent-cage.env",
       },
       {
         name: "Clear in-progress label",
@@ -190,7 +190,7 @@ export function generateGitHubActionsWorkflow(input: GitHubActionsWorkflowInput)
 
   return stringify(
     {
-      name: input.name ?? "Codex Cage issue run",
+      name: input.name ?? "Agent Cage issue run",
       on: {
         issues: { types: ["labeled"] },
         workflow_dispatch: {
@@ -219,7 +219,7 @@ export function requiredActionsSecretGroups(
 ): string[][] {
   return [
     ...[...agentProvidersInUse(agents)].map((provider) => agentSecretNames([provider])),
-    ["CODEX_CAGE_GITHUB_TOKEN"],
+    ["AGENT_CAGE_GITHUB_TOKEN"],
   ];
 }
 
@@ -270,7 +270,7 @@ function credentialStepEnv(agentSecrets: readonly string[]): Record<string, stri
     ...Object.fromEntries(
       agentSecrets.map((name) => [name, expression(`secrets.${name}`)]),
     ),
-    CODEX_CAGE_GITHUB_TOKEN: expression("secrets.CODEX_CAGE_GITHUB_TOKEN"),
+    AGENT_CAGE_GITHUB_TOKEN: expression("secrets.AGENT_CAGE_GITHUB_TOKEN"),
   };
 }
 
@@ -279,10 +279,10 @@ function writeCredentialsCommand(agentSecrets: readonly string[]): string {
   const format = names.map((name) => `${name}=%s\\n`).join("");
   const values = [
     ...agentSecrets.map((name) => `"$${name}"`),
-    '"$CODEX_CAGE_GITHUB_TOKEN"',
+    '"$AGENT_CAGE_GITHUB_TOKEN"',
   ];
 
-  return `printf '${format}' ${values.join(" ")} > .codex-cage.env`;
+  return `printf '${format}' ${values.join(" ")} > .agent-cage.env`;
 }
 
 function expression(value: string): string {
@@ -308,8 +308,8 @@ function runtimeConfig(runtime: GitHubActionsRuntime): Record<string, unknown> {
 }
 
 function assertInput(input: GitHubActionsWorkflowInput): void {
-  if (!versionPattern.test(input.codexCageVersion)) {
-    throw new Error("codexCageVersion must be an exact semantic version.");
+  if (!versionPattern.test(input.agentCageVersion)) {
+    throw new Error("agentCageVersion must be an exact semantic version.");
   }
   if (
     input.timeoutMinutes !== undefined &&

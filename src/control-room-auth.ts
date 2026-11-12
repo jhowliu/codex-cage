@@ -1,7 +1,7 @@
-import { readCodexCageEnv } from "./guards.js";
+import { readAgentCageEnv } from "./guards.js";
 
 export type GithubAuthState = "connected" | "invalid" | "missing" | "unavailable";
-export type GithubAuthSource = "codex-cage-env" | "none";
+export type GithubAuthSource = "agent-cage-env" | "none";
 
 export type GithubAuthStatus = {
   provider: "github";
@@ -24,12 +24,12 @@ export async function readGithubAuthStatus(
   let env: Record<string, string>;
 
   try {
-    env = await readCodexCageEnv(cwd);
+    env = await readAgentCageEnv(cwd);
   } catch {
     return createStatus(
       "unavailable",
       "none",
-      "Could not read .codex-cage.env. Check the file and try again.",
+      "Could not read .agent-cage.env. Check the file and try again.",
       checkedAt,
     );
   }
@@ -39,7 +39,7 @@ export async function readGithubAuthStatus(
     return createStatus(
       "missing",
       "none",
-      "Add GITHUB_TOKEN to .codex-cage.env, then recheck authentication.",
+      "Add GITHUB_TOKEN to .agent-cage.env, then recheck authentication.",
       checkedAt,
     );
   }
@@ -60,7 +60,7 @@ export async function readGithubAuthStatus(
     if (response.ok) {
       return createStatus(
         "connected",
-        "codex-cage-env",
+        "agent-cage-env",
         "GitHub authentication is ready for new tasks.",
         checkedAt,
       );
@@ -69,22 +69,22 @@ export async function readGithubAuthStatus(
     if (response.status === 401) {
       return createStatus(
         "invalid",
-        "codex-cage-env",
-        "GitHub rejected the configured token. Update .codex-cage.env, then recheck.",
+        "agent-cage-env",
+        "GitHub rejected the configured token. Update .agent-cage.env, then recheck.",
         checkedAt,
       );
     }
 
     return createStatus(
       "unavailable",
-      "codex-cage-env",
+      "agent-cage-env",
       `GitHub authentication could not be verified (${response.status}). Try again shortly.`,
       checkedAt,
     );
   } catch {
     return createStatus(
       "unavailable",
-      "codex-cage-env",
+      "agent-cage-env",
       "GitHub could not be reached. Check your connection and try again.",
       checkedAt,
     );

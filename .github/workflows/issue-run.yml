@@ -1,8 +1,8 @@
-name: Codex Cage issue run
+name: Agent Cage issue run
 
-# Label an issue with `codex-cage:run` to have Codex Cage implement it and open
+# Label an issue with `agent-cage:run` to have Agent Cage implement it and open
 # a PR. Requires these labels to exist and two secrets (see docs/workflow.md):
-#   - CODEX_CAGE_GITHUB_TOKEN: a PAT or GitHub App token (NOT the default
+#   - AGENT_CAGE_GITHUB_TOKEN: a PAT or GitHub App token (NOT the default
 #     GITHUB_TOKEN, whose events do not trigger downstream workflows).
 #   - OPENAI_API_KEY: Codex auth for direct-mode runs.
 on:
@@ -11,7 +11,7 @@ on:
 
 # One run per issue; a second label while a run is in flight is queued, not raced.
 concurrency:
-  group: codex-cage-issue-${{ github.event.issue.number }}
+  group: agent-cage-issue-${{ github.event.issue.number }}
   cancel-in-progress: false
 
 permissions:
@@ -22,11 +22,11 @@ env:
 
 jobs:
   run:
-    if: github.event.label.name == 'codex-cage:run'
+    if: github.event.label.name == 'agent-cage:run'
     runs-on: ubuntu-latest
     env:
-      CODEX_CAGE_EXECUTION: direct
-      GH_TOKEN: ${{ secrets.CODEX_CAGE_GITHUB_TOKEN }}
+      AGENT_CAGE_EXECUTION: direct
+      GH_TOKEN: ${{ secrets.AGENT_CAGE_GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
       ISSUE_URL: ${{ github.event.issue.html_url }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -34,10 +34,10 @@ jobs:
       - name: Mark issue in progress
         run: |
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --remove-label 'codex-cage:run' \
-            --add-label 'codex-cage:in-progress'
+            --remove-label 'agent-cage:run' \
+            --add-label 'agent-cage:in-progress'
 
-      - name: Check out Codex Cage
+      - name: Check out Agent Cage
         uses: actions/checkout@v4
 
       - name: Set up Node.js
@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Build Codex Cage
+      - name: Build Agent Cage
         run: |
           npm ci
           npm run build
@@ -53,45 +53,45 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
 
-      - name: Write Codex Cage credentials
+      - name: Write Agent Cage credentials
         run: |
           {
             printf 'OPENAI_API_KEY=%s\n' "${{ secrets.OPENAI_API_KEY }}"
-            printf 'GITHUB_TOKEN=%s\n' "${{ secrets.CODEX_CAGE_GITHUB_TOKEN }}"
-          } > .codex-cage.env
+            printf 'GITHUB_TOKEN=%s\n' "${{ secrets.AGENT_CAGE_GITHUB_TOKEN }}"
+          } > .agent-cage.env
 
-      - name: Run Codex Cage
+      - name: Run Agent Cage
         run: node dist/src/cli.js run "$ISSUE_URL" --verbose --result-json "$RUNNER_TEMP/result.json"
 
       - name: Mark issue ready for review
         if: success()
         run: |
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --add-label 'codex-cage:ready-for-review'
+            --add-label 'agent-cage:ready-for-review'
 
       - name: Report failure
         if: failure()
         run: |
           FAILURE_CODE=$(jq -r '.failureCode // "unknown"' "$RUNNER_TEMP/result.json" 2>/dev/null || echo unknown)
-          BODY="Codex Cage run failed (\`${FAILURE_CODE}\`). [View workflow run](${RUN_URL})."
-          SUMMARY_FILE=$(ls .codex-cage/runs/*/summary.md 2>/dev/null | head -n1 || true)
+          BODY="Agent Cage run failed (\`${FAILURE_CODE}\`). [View workflow run](${RUN_URL})."
+          SUMMARY_FILE=$(ls .agent-cage/runs/*/summary.md 2>/dev/null | head -n1 || true)
           if [ -n "$SUMMARY_FILE" ]; then
             BODY="${BODY}"$'\n\n'"$(cat "$SUMMARY_FILE")"
           fi
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --add-label 'codex-cage:blocked'
+            --add-label 'agent-cage:blocked'
 
       - name: Upload run artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codex-cage-run-${{ github.event.issue.number }}
-          path: .codex-cage/runs/
+          name: agent-cage-run-${{ github.event.issue.number }}
+          path: .agent-cage/runs/
           if-no-files-found: ignore
 
       - name: Clear in-progress label
         if: always()
         run: |
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --remove-label 'codex-cage:in-progress' || true
+            --remove-label 'agent-cage:in-progress' || true

@@ -19,7 +19,7 @@ import {
 async function withWorkspace(
   fn: (workspacePath: string) => Promise<void>,
 ): Promise<void> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "codex-cage-host-")));
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "agent-cage-host-")));
   try {
     await fn(dir);
   } finally {

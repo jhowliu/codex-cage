@@ -9,23 +9,23 @@ import {
 } from "../src/prompt-context.js";
 
 async function tempProject(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "codex-cage-prompt-context-"));
+  return await mkdtemp(join(tmpdir(), "agent-cage-prompt-context-"));
 }
 
 test("buildPromptContext records present review policy without reading ignored instruction files", async () => {
   const cwd = await tempProject();
 
   try {
-    await mkdir(join(cwd, ".codex-cage"), { recursive: true });
+    await mkdir(join(cwd, ".agent-cage"), { recursive: true });
     await mkdir(join(cwd, ".github"), { recursive: true });
     await writeFile(join(cwd, "AGENTS.md"), "Agent secret rule\n", "utf8");
     await writeFile(
-      join(cwd, ".codex-cage", "instructions.md"),
+      join(cwd, ".agent-cage", "instructions.md"),
       "Cage secret rule\n",
       "utf8",
     );
     await writeFile(
-      join(cwd, ".codex-cage", "review-policy.md"),
+      join(cwd, ".agent-cage", "review-policy.md"),
       "Policy secret content\n",
       "utf8",
     );
@@ -40,12 +40,12 @@ test("buildPromptContext records present review policy without reading ignored i
     const formatted = formatReviewPolicyForPrompt(context);
 
     assert.deepEqual(context.reviewPolicy, {
-      path: ".codex-cage/review-policy.md",
-      containerPath: ".codex-cage/review-policy.md",
+      path: ".agent-cage/review-policy.md",
+      containerPath: ".agent-cage/review-policy.md",
       status: "present",
     });
     assert.match(formatted, /Target review policy: present/);
-    assert.match(formatted, /\.codex-cage\/review-policy\.md/);
+    assert.match(formatted, /\.agent-cage\/review-policy\.md/);
     assert.doesNotMatch(JSON.stringify(context), /Agent secret rule/);
     assert.doesNotMatch(JSON.stringify(context), /Cage secret rule/);
     assert.doesNotMatch(JSON.stringify(context), /Copilot secret rule/);

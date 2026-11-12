@@ -22,9 +22,9 @@ function runStartedDetails(
     payload: {
       issueKey: "#105",
       issueTitle,
-      repository: "jhowliu/codex-cage",
+      repository: "jhowliu/agent-cage",
       baseBranch: "main",
-      branch: "codex-cage/gh-105-run-events",
+      branch: "agent-cage/gh-105-run-events",
       artifactDirectory: "/tmp/run-events",
       executionMode: "direct",
     },
@@ -89,7 +89,7 @@ test("RunEvent schema is versioned, strict, and validates canonical activity con
 });
 
 test("RunEventJournal sequences, redacts, bounds, and appends before delivery", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "codex-cage-events-"));
+  const directory = await mkdtemp(join(tmpdir(), "agent-cage-events-"));
   const path = join(directory, "events.ndjson");
   const delivered: RunEvent[] = [];
   let clockTick = 0;
@@ -142,7 +142,7 @@ test("RunEventJournal sequences, redacts, bounds, and appends before delivery", 
 });
 
 test("RunEventJournal keeps durable sequencing when observer delivery fails", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "codex-cage-events-failed-sink-"));
+  const directory = await mkdtemp(join(tmpdir(), "agent-cage-events-failed-sink-"));
   const path = join(directory, "events.ndjson");
   const originalConsoleError = console.error;
   const deliveryErrors: string[] = [];
@@ -184,7 +184,7 @@ test("RunEventJournal keeps durable sequencing when observer delivery fails", as
 });
 
 test("replay validates NDJSON, ignores exact duplicate delivery, and restores outcomes", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "codex-cage-replay-"));
+  const directory = await mkdtemp(join(tmpdir(), "agent-cage-replay-"));
   const path = join(directory, "events.ndjson");
 
   try {

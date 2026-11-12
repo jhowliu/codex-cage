@@ -1,11 +1,11 @@
-# Codex Cage Base Image
+# Agent Cage Base Image
 
-The base image is the minimal runtime for Codex Cage agent containers.
+The base image is the minimal runtime for Agent Cage agent containers.
 
 Published image:
 
 ```text
-ghcr.io/jhowliu/codex-cage/base:0.1.2
+ghcr.io/jhowliu/agent-cage/base:0.1.2
 ```
 
 The CLI should use immutable version tags for reproducible runs. The `latest` tag is published only as a manual testing convenience.
@@ -26,7 +26,7 @@ The image is based on `node:22-bookworm` and includes:
 - a non-root `agent` user
 - `/workspace` owned by `agent`
 
-The image intentionally does not include Docker CLI, Python, Go, Rust, Java, native build toolchains, database clients, browser tooling, `tini`, or a custom entrypoint. Target repositories should add project-specific system dependencies in their own `.codex-cage/Dockerfile`.
+The image intentionally does not include Docker CLI, Python, Go, Rust, Java, native build toolchains, database clients, browser tooling, `tini`, or a custom entrypoint. Target repositories should add project-specific system dependencies in their own `.agent-cage/Dockerfile`.
 
 ## Local Validation
 
@@ -34,15 +34,15 @@ The image intentionally does not include Docker CLI, Python, Go, Rust, Java, nat
 npm run qa:image
 ```
 
-This builds `codex-cage/base:local` and verifies the expected tools are available as the `agent` user.
+This builds `agent-cage/base:local` and verifies the expected tools are available as the `agent` user.
 
 ## Publishing
 
 The image publish workflow builds `docker/base/Dockerfile` and pushes:
 
 ```text
-ghcr.io/jhowliu/codex-cage/base:<version>
-ghcr.io/jhowliu/codex-cage/base:latest
+ghcr.io/jhowliu/agent-cage/base:<version>
+ghcr.io/jhowliu/agent-cage/base:latest
 ```
 
 Publishing is available through manual workflow dispatch and tags shaped like `base-v0.1.2`. Published images include `linux/amd64` and `linux/arm64` manifests.

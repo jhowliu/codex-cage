@@ -175,7 +175,7 @@ export const execaReviewAgentRunner: ReviewAgentRunner = {
 };
 
 async function runCodexReviewOnHost(input: ReviewAgentRunInput): Promise<string> {
-  const tempDirectory = await mkdtemp(join(tmpdir(), "codex-cage-review-"));
+  const tempDirectory = await mkdtemp(join(tmpdir(), "agent-cage-review-"));
   const outputSchemaPath = join(tempDirectory, "review-output-schema.json");
 
   try {
@@ -267,7 +267,7 @@ export async function runIndependentReview(
 }
 
 export function buildReviewPrompt(input: BuildReviewPromptInput): string {
-  return `You are the independent Codex Cage review agent.
+  return `You are the independent Agent Cage review agent.
 
 Review the implementation as a read-only reviewer. Do not edit files, commit, push, run destructive commands, create PRs, or write secrets.
 

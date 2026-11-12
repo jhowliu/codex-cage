@@ -254,7 +254,7 @@ test("generateRuntimeDockerfile keeps toolchain PATHs for the sandbox's login sh
   assert.ok(lines.includes(`ENV PATH=${paths}:$PATH`));
   assert.ok(
     lines.includes(
-      `RUN echo 'export PATH="${paths}:$PATH"' > /etc/profile.d/codex-cage-toolchains.sh`,
+      `RUN echo 'export PATH="${paths}:$PATH"' > /etc/profile.d/agent-cage-toolchains.sh`,
     ),
   );
   assert.ok(
