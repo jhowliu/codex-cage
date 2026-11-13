@@ -42,6 +42,7 @@ Make each issue a **vertical slice** one run can finish: one PR that the reposit
 ```
 
 - Keep each issue to its task. Write new scope you notice as its own follow-up issue.
+- Issues that will change the same file conflict when they run at the same time. Chain them: list the earlier issue under the later one's `## Blocked by`, so the later run starts from the merged change. Small tasks in the same file, such as a few one-line functions, can be one issue instead.
 - A task that needs a person, such as visual judgement, credentials, production access, or a change no command can verify, is not delegatable. Create its issue, leave it out of the runs, and tell the user.
 
 Create blockers first, so later issues can reference their numbers:
