@@ -368,7 +368,7 @@ Review is read-only. If the diff changes during review, the run fails instead of
 
 Successful runs are published by the orchestrator, not by the implementation or review agents. Agent Cage rejects empty diffs, creates a run-specific branch, configures the Agent Cage git author, commits once, pushes without force, and creates a ready GitHub PR by default.
 
-PR bodies include the summary, verification, review status, risks, run id, and issue linkage. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
+A passing review writes the PR description. It follows the pull request rules in the `AGENTS.md` and `CLAUDE.md` files that apply to the changed paths, so put rules such as required PR sections there. Agent Cage appends the verification, review status, risks, run id, and issue linkage after it. If the review leaves the description out, the PR opens with a one-line summary instead. GitHub issues use closing keywords such as `Closes #123`; Linear issues are linked without mutating Linear.
 
 ## Cleanup
 

@@ -609,6 +609,7 @@ async function runImplementationLoop(input: {
       redactor: input.redactor,
       publish: input.publish,
       verification,
+      description: reviewAction.prDescription,
     });
     await input.journal.recordSuccess(publishResult);
 

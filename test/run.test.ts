@@ -121,16 +121,19 @@ function shellRunner(results: Map<string, CommandResult>): ShellRunner & {
   };
 }
 
-function passingReview(): RunIndependentReviewResult {
+function passingReview(
+  prDescription: string | null = "Wires the run command.",
+): RunIndependentReviewResult {
   const report: ReviewReport = {
     decision: "pass",
     summary: "No blocking issues.",
     findings: [],
+    prDescription,
   };
 
   return {
     report,
-    nextAction: { action: "continue" },
+    nextAction: { action: "continue", prDescription },
   };
 }
 
@@ -381,10 +384,12 @@ verify:
       reviewPrompt,
       /Target review policy: missing\. Proceed with built-in review rules\./,
     );
+    // A report without prDescription still passes; publish falls back to its own summary.
     assert.deepEqual(JSON.parse(reviewLog), {
       decision: "pass",
       summary: "No blocking issues.",
       findings: [],
+      prDescription: null,
     });
   } finally {
     await rm(cwd, { recursive: true, force: true });
@@ -512,6 +517,7 @@ verify:
     });
     assert.equal(published.length, 1);
     assert.equal(published[0]?.metadata.verification[0], "`npm test` passed");
+    assert.equal(published[0]?.metadata.description, "Wires the run command.");
     assert.deepEqual(published[0]?.env, {
       GH_TOKEN: "token-value",
       GITHUB_TOKEN: "token-value",
@@ -1247,6 +1253,7 @@ agent:
             line: 2,
           },
         ],
+        prDescription: null,
       },
       nextAction: {
         action: "fail",

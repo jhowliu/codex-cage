@@ -52,7 +52,7 @@ const issue: IssueContext = {
 
 const metadata: PublishMetadata = {
   runId: "run-qa-1234567890",
-  summary: "Fake QA implementation completed.",
+  description: "Fake QA implementation completed.",
   verification: ["fake verify passed"],
   reviewStatus: "Independent review passed.",
   risks: [],

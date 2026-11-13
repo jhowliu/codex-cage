@@ -20,10 +20,13 @@ export type ReviewReport = {
   decision: "pass" | "blocking";
   summary: string;
   findings: ReviewFinding[];
+  // The pull request description a passing review writes; null when blocking
+  // or left out, and publish then falls back to its own one-line summary.
+  prDescription: string | null;
 };
 
 export type ReviewNextAction =
-  | { action: "continue" }
+  | { action: "continue"; prDescription: string | null }
   | { action: "fix"; nextCycle: number; feedback: string }
   | { action: "fail"; failureCode: "review_blocking"; feedback: string };
 
@@ -95,6 +98,7 @@ const reviewReportSchema = z
     decision: z.enum(["pass", "blocking"]),
     summary: z.string().min(1),
     findings: z.array(reviewFindingSchema),
+    prDescription: z.string().nullable().optional(),
   })
   .strict()
   .superRefine((report, context) => {
@@ -117,12 +121,24 @@ const reviewReportSchema = z
         path: ["findings"],
       });
     }
+  })
+  .transform((report): ReviewReport => {
+    const prDescription = report.prDescription?.trim() ?? "";
+
+    return {
+      decision: report.decision,
+      summary: report.summary,
+      findings: report.findings,
+      // A blocking review's description would describe a diff that changes next.
+      prDescription:
+        report.decision === "pass" && prDescription !== "" ? prDescription : null,
+    };
   });
 
 export const reviewReportJsonSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["decision", "summary", "findings"],
+  required: ["decision", "summary", "findings", "prDescription"],
   properties: {
     decision: {
       type: "string",
@@ -155,6 +171,9 @@ export const reviewReportJsonSchema = {
           },
         },
       },
+    },
+    prDescription: {
+      type: ["string", "null"],
     },
   },
 } as const satisfies Record<string, unknown>;
@@ -284,8 +303,11 @@ Return only JSON matching this schema:
       "path": "optional/file/path or null",
       "line": 123 or null
     }
-  ]
+  ],
+  "prDescription": "Markdown pull request description" or null
 }
+
+When the decision is "pass", write "prDescription": the description of the pull request that will publish this diff, in Markdown. Follow the pull request description rules in the AGENTS.md and CLAUDE.md files that apply to the changed paths, if they have any, and read the changed files to describe them accurately. Without such rules, say in a few sentences what changed and why, then how a reviewer can try it. Agent Cage appends the verification results, this review's status, the run ID and the issue link after your description, so leave those out. When the decision is "blocking", set "prDescription" to null.
 
 Issue context:
 ${input.issueContext}
@@ -317,7 +339,7 @@ export function reviewNextAction(input: {
   maxReviewCycles: number;
 }): ReviewNextAction {
   if (input.report.decision === "pass") {
-    return { action: "continue" };
+    return { action: "continue", prDescription: input.report.prDescription };
   }
 
   const feedback = blockingReviewFeedback(input.report);

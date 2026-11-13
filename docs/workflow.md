@@ -378,6 +378,8 @@ Agent Cage relies on Codex CLI's native `AGENTS.md` handling for repository impl
 
 Independent review has an optional project policy file at `.agent-cage/review-policy.md`. The review policy may add stricter project-specific checks, but it cannot override Agent Cage built-in reviewer rules or weaken blocking criteria. Missing review policy files are allowed.
 
+A passing review also writes the PR description. The review prompt asks it to follow the pull request rules in the `AGENTS.md` and `CLAUDE.md` files that apply to the changed paths, so rules for PR descriptions belong there, where people opening PRs read them too, not in the review policy. Agent Cage appends the verification, review status, risks, run id, and issue link after the description, and opens the PR with a one-line summary when the review leaves the description out.
+
 Each run records prompt context artifacts under `.agent-cage/runs/<run-id>`:
 
 - `prompt-context.json`

@@ -22,7 +22,8 @@ export type CommandRunOptions = {
 
 export type PublishMetadata = {
   runId: string;
-  summary: string;
+  // The review agent's description of the change; null falls back to a one-line summary.
+  description: string | null;
   verification: string[];
   reviewStatus: string;
   risks: string[];
@@ -212,8 +213,11 @@ export function formatPrBody(input: {
       ? "- Not recorded."
       : input.metadata.verification.map((item) => `- ${item}`).join("\n");
 
-  return `## Summary
-${input.metadata.summary}
+  const description =
+    input.metadata.description ??
+    `Implemented ${input.issue.identifier}: ${input.issue.title}`;
+
+  return `${description}
 
 ## Verification
 ${verification}

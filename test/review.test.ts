@@ -28,6 +28,7 @@ const passReportJson = JSON.stringify({
   decision: "pass",
   summary: "No blocking issues.",
   findings: [],
+  prDescription: "Adds review.\n\n## How to use\n\nRun `npm test`.\n",
 });
 
 const blockingReportJson = JSON.stringify({
@@ -41,6 +42,7 @@ const blockingReportJson = JSON.stringify({
       line: 42,
     },
   ],
+  prDescription: null,
 });
 
 test("buildReviewPrompt includes read-only instructions and required context", () => {
@@ -65,6 +67,26 @@ test("buildReviewPrompt includes read-only instructions and required context", (
   assert.match(prompt, /diff --git/);
 });
 
+test("buildReviewPrompt asks a passing review for a PR description that follows the repo's rules", () => {
+  const prompt = buildReviewPrompt({
+    issueContext: "Issue: add review",
+    diff: "diff --git a/src/app.ts b/src/app.ts",
+    verificationSummary: "npm test passed",
+    resultMetadata: { runId: "run-1" },
+  });
+
+  assert.match(prompt, /"prDescription": "Markdown pull request description" or null/);
+  assert.match(
+    prompt,
+    /pull request description rules in the AGENTS\.md and CLAUDE\.md files/,
+  );
+  assert.match(
+    prompt,
+    /Agent Cage appends the verification results, this review's status, the run ID and the issue link/,
+  );
+  assert.match(prompt, /When the decision is "blocking", set "prDescription" to null/);
+});
+
 test("parseReviewReport accepts strict structured JSON from the review agent", () => {
   assert.deepEqual(parseReviewReport(`\n\`\`\`json\n${blockingReportJson}\n\`\`\`\n`), {
     decision: "blocking",
@@ -77,6 +99,7 @@ test("parseReviewReport accepts strict structured JSON from the review agent", (
         line: 42,
       },
     ],
+    prDescription: null,
   });
 });
 
@@ -87,6 +110,7 @@ test("parseReviewReport ignores non-json fenced blocks before JSON", () => {
       decision: "pass",
       summary: "No blocking issues.",
       findings: [],
+      prDescription: "Adds review.\n\n## How to use\n\nRun `npm test`.",
     },
   );
 });
@@ -116,7 +140,26 @@ test("parseReviewReport normalizes nullable structured output fields", () => {
           message: "Missing required behavior.",
         },
       ],
+      prDescription: null,
     },
+  );
+});
+
+test("parseReviewReport keeps a PR description only from a passing review", () => {
+  const pass = { decision: "pass", summary: "ok", findings: [] };
+  const blocking = JSON.parse(blockingReportJson) as Record<string, unknown>;
+
+  assert.equal(parseReviewReport(JSON.stringify(pass)).prDescription, null, "left out");
+  assert.equal(
+    parseReviewReport(JSON.stringify({ ...pass, prDescription: "  \n" })).prDescription,
+    null,
+    "blank",
+  );
+  assert.equal(
+    parseReviewReport(JSON.stringify({ ...blocking, prDescription: "Adds review." }))
+      .prDescription,
+    null,
+    "a blocking review's diff changes before publish",
   );
 });
 
@@ -150,7 +193,10 @@ test("reviewNextAction allows passing review to continue", () => {
       cycle: 0,
       maxReviewCycles: 2,
     }),
-    { action: "continue" },
+    {
+      action: "continue",
+      prDescription: "Adds review.\n\n## How to use\n\nRun `npm test`.",
+    },
   );
 });
 
@@ -214,10 +260,14 @@ test("runIndependentReview runs a fresh review runner and returns parsed action"
     "decision",
     "summary",
     "findings",
+    "prDescription",
   ]);
   assert.deepEqual(runner.calls[0]?.env, { OPENAI_API_KEY: "secret" });
   assert.equal(result.report.decision, "pass");
-  assert.deepEqual(result.nextAction, { action: "continue" });
+  assert.deepEqual(result.nextAction, {
+    action: "continue",
+    prDescription: "Adds review.\n\n## How to use\n\nRun `npm test`.",
+  });
 });
 
 test("runIndependentReview fails if the read-only review changes the diff", async () => {
