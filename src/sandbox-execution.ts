@@ -351,9 +351,18 @@ export async function requiredShell(
   return log;
 }
 
-export async function readCurrentDiff(shell: ShellRunner): Promise<string> {
+/**
+ * Reads the uncommitted change against HEAD, or, with mergeBaseWith, the
+ * whole branch plus uncommitted work against its merge base with that ref.
+ */
+export async function readCurrentDiff(
+  shell: ShellRunner,
+  mergeBaseWith?: string,
+): Promise<string> {
+  const target =
+    mergeBaseWith === undefined ? "HEAD" : `--merge-base ${shellQuote(mergeBaseWith)}`;
   const result = await shell.run(
-    "git add --intent-to-add -- . && git diff --binary HEAD",
+    `git add --intent-to-add -- . && git diff --binary ${target}`,
   );
 
   if (result.exitCode !== 0) {

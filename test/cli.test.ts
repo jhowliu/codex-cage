@@ -7,7 +7,11 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCli } from "../src/commands.js";
-import type { RunCommandOptions, RunAgentCageResult } from "../src/run.js";
+import type {
+  ReviseCommandOptions,
+  RunAgentCageResult,
+  RunCommandOptions,
+} from "../src/run.js";
 import { RunFailureError } from "../src/run/errors.js";
 import { openRunStore } from "../src/state.js";
 
@@ -65,6 +69,7 @@ test("root help lists commands", () => {
   assert.match(result.stdout, /\bsetup\b/);
   assert.match(result.stdout, /\bdoctor\b/);
   assert.match(result.stdout, /\brun\b/);
+  assert.match(result.stdout, /\brevise\b/);
   assert.match(result.stdout, /\bruns\b/);
   assert.match(result.stdout, /\bcleanup\b/);
   assert.doesNotMatch(result.stdout, /\binit\b/);
@@ -75,6 +80,7 @@ test("command help is available for commands", () => {
     ["setup", "--help"],
     ["doctor", "--help"],
     ["run", "--help"],
+    ["revise", "--help"],
     ["runs", "list", "--help"],
     ["runs", "show", "--help"],
     ["cleanup", "--help"],
@@ -129,6 +135,63 @@ test("run accepts a positional issue URL", async () => {
       repo: "jhowliu/agent-cage",
     },
   ]);
+});
+
+test("revise passes the PR URL and feedback and writes the result file", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "agent-cage-cli-revise-"));
+  const resultPath = join(cwd, "result.json");
+  const calls: ReviseCommandOptions[] = [];
+  const originalConsoleLog = console.log;
+  const originalExitCode = process.exitCode;
+  process.exitCode = 0;
+  const program = createCli({
+    reviseAgentCagePullRequest: async (input): Promise<RunAgentCageResult> => {
+      calls.push(input);
+      throw new RunFailureError("no_feedback", "Nothing to address.");
+    },
+  });
+
+  program.exitOverride();
+  program.configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+  console.log = () => undefined;
+  const originalConsoleError = console.error;
+  console.error = () => undefined;
+
+  try {
+    await program.parseAsync(
+      [
+        "revise",
+        "https://github.com/jhowliu/agent-cage/pull/40",
+        "--feedback",
+        "Rename the flag.",
+        "--result-json",
+        resultPath,
+      ],
+      { from: "user" },
+    );
+    assert.equal(process.exitCode, 1);
+  } finally {
+    console.log = originalConsoleLog;
+    console.error = originalConsoleError;
+    process.exitCode = originalExitCode;
+  }
+
+  try {
+    assert.deepEqual(calls, [
+      {
+        prUrl: "https://github.com/jhowliu/agent-cage/pull/40",
+        feedback: "Rename the flag.",
+      },
+    ]);
+    assert.deepEqual(JSON.parse(await readFile(resultPath, "utf8")), {
+      runId: "unstarted",
+      status: "failed",
+      failureCode: "no_feedback",
+      prUrl: null,
+    });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("run writes the result file and exits zero on success", async () => {

@@ -18,13 +18,15 @@ import {
 } from "./docker.js";
 import type { IssueContext } from "./issue.js";
 import { scanDiffForGuardViolations } from "./guards.js";
-import { NoDiffError, publishSuccessfulRun } from "./publish.js";
+import { NoDiffError, publishRevision, publishSuccessfulRun } from "./publish.js";
 import type { PromptContext } from "./prompt-context.js";
+import type { RevisionContext } from "./pull-request.js";
 import type { AuthenticatedRepo, RepoResolution } from "./repo.js";
 import { runIndependentReview, ReviewModifiedDiffError } from "./review.js";
 import { RunFailureError } from "./run/errors.js";
 import type { RunEventSink } from "./run/events.js";
 import {
+  readRunDiff,
   runPublishGate,
   runReviewGate,
   runSecretGuardGate,
@@ -38,7 +40,6 @@ import {
   createHostWorkspace,
   createLineStreamSink,
   formatCommandLog,
-  readCurrentDiff,
   requiredAgentShell,
   requiredShell,
   type HostWorkspace,
@@ -105,6 +106,8 @@ export type RuntimeContext = {
   promptContext: PromptContext;
   executionMode: ExecutionMode;
   verbose: boolean;
+  // Set when the run revises an open pull request instead of opening one.
+  revision: RevisionContext | null;
 };
 
 export type RunWorkflowInput = {
@@ -123,6 +126,7 @@ export type RunWorkflowInput = {
   createComposeProject?: typeof createComposeProject;
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
+  publishRevision?: typeof publishRevision;
   onProgress?: (event: RunProgressEvent) => void;
   onEvent?: RunEventSink;
 };
@@ -137,6 +141,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunAgentCage
   const makeComposeProject = input.createComposeProject ?? createComposeProject;
   const review = input.runIndependentReview ?? runIndependentReview;
   const publish = input.publishSuccessfulRun ?? publishSuccessfulRun;
+  const revise = input.publishRevision ?? publishRevision;
   const onProgress = input.onProgress ?? (() => undefined);
   const journal = new RunJournal(input.store, context, onProgress, input.onEvent);
   const redactor = context.credentials.redactor();
@@ -160,6 +165,9 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunAgentCage
     await journal.startStage("prepare");
     await journal.writeJsonArtifact("issue.json", context.issue);
     await journal.writePromptContextArtifact();
+    if (context.revision !== null) {
+      await journal.writeJsonArtifact("revision.json", context.revision);
+    }
     await journal.writeJsonArtifact("resolved-config.json", {
       config: context.config,
       warnings: context.configWarnings,
@@ -174,6 +182,12 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunAgentCage
         `Repo: ${context.repoResolution.repo.fullName}`,
         `Base: ${context.baseBranch}`,
         `Branch: ${context.branchName}`,
+        ...(context.revision === null
+          ? []
+          : [
+              `Pull request: ${context.revision.pullRequest.url}`,
+              `Feedback items: ${context.revision.feedback.length}`,
+            ]),
       ].join("\n");
     });
 
@@ -245,6 +259,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunAgentCage
       redactor,
       review,
       publish,
+      revise,
     });
 
     return runResult;
@@ -252,7 +267,7 @@ export async function runWorkflow(input: RunWorkflowInput): Promise<RunAgentCage
     const failureCode = failureCodeFromError(error);
     if (shell !== null) {
       try {
-        const failedDiff = await readCurrentDiff(shell);
+        const failedDiff = await readRunDiff(shell, context);
         const violations = scanDiffForGuardViolations(failedDiff, {
           injectedSecrets: context.credentials.injectedSecrets(),
         });
@@ -376,9 +391,7 @@ async function provisionDockerSandbox(input: {
       await sandbox.cloneRepository();
       return await requiredShell(
         shell,
-        `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
-          context.baseBranch,
-        )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+        checkoutCommand(context),
         redactor,
         cloneCredentials,
       );
@@ -428,9 +441,7 @@ async function provisionDirectWorkspace(input: {
       );
       return await requiredShell(
         shell,
-        `git fetch origin ${shellQuote(context.baseBranch)} && git checkout ${shellQuote(
-          context.baseBranch,
-        )} && git pull --ff-only origin ${shellQuote(context.baseBranch)}`,
+        checkoutCommand(context),
         redactor,
         cloneCredentials,
       );
@@ -438,6 +449,25 @@ async function provisionDirectWorkspace(input: {
   );
 
   return shell;
+}
+
+/**
+ * Checks out the branch the run works on: the base branch for a new pull
+ * request, or the pull request's branch for a revision. A revision fetches the
+ * base too, since its diff starts at the merge base with it.
+ */
+function checkoutCommand(context: RuntimeContext): string {
+  const base = shellQuote(context.baseBranch);
+
+  if (context.revision === null) {
+    return `git fetch origin ${base} && git checkout ${base} && git pull --ff-only origin ${base}`;
+  }
+
+  const headBranch = context.revision.pullRequest.headBranch;
+  const head = shellQuote(headBranch);
+  return `git fetch origin ${base} ${head} && git checkout -B ${head} ${shellQuote(
+    `origin/${headBranch}`,
+  )}`;
 }
 
 /**
@@ -468,6 +498,7 @@ async function runImplementationLoop(input: {
   redactor: (input: string) => string;
   review: typeof runIndependentReview;
   publish: typeof publishSuccessfulRun;
+  revise: typeof publishRevision;
 }): Promise<RunAgentCageResult> {
   const feedback: string[] = [];
   let reviewCycle = 0;
@@ -533,7 +564,7 @@ async function runImplementationLoop(input: {
       continue;
     }
 
-    const diff = await readCurrentDiff(input.shell);
+    const diff = await readRunDiff(input.shell, input.context);
     let secretGuard: ReturnType<typeof runSecretGuardGate>;
     try {
       secretGuard = runSecretGuardGate({
@@ -608,6 +639,7 @@ async function runImplementationLoop(input: {
       shell: input.shell,
       redactor: input.redactor,
       publish: input.publish,
+      revise: input.revise,
       verification,
       description: reviewAction.prDescription,
     });

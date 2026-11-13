@@ -99,6 +99,12 @@ Run a Linear issue by passing the target GitHub repo:
 agent-cage run https://linear.app/ORG/issue/ENG-123/title --repo OWNER/REPO
 ```
 
+Revise a PR that a run opened, from its review threads and comments:
+
+```bash
+agent-cage revise https://github.com/OWNER/REPO/pull/45
+```
+
 Inspect local run state:
 
 ```bash
@@ -118,6 +124,7 @@ Use `agent-cage --help` or `agent-cage <command> --help` for the current CLI hel
 | `agent-cage doctor`             | Diagnose local tools, credentials, workflow, labels, and Actions secrets; `--probe` also test-calls each agent. |
 | `agent-cage check <issue-url>`  | Check whether an issue is ready to run: its `## Blocked by` issues are closed and the config is valid.          |
 | `agent-cage run <issue-url>`    | Run the full issue-to-PR workflow for a GitHub or Linear issue.                                                 |
+| `agent-cage revise <pr-url>`    | Revise an open PR that Agent Cage opened, from its feedback; `--feedback` adds instructions.                    |
 | `agent-cage runs list`          | List locally recorded runs from `.agent-cage/agent-cage.sqlite`; `--json` for tools.                            |
 | `agent-cage runs show <run-id>` | Show run metadata, phase status, and artifact paths.                                                            |
 | `agent-cage cleanup`            | Remove stale stopped Docker resources managed by Agent Cage.                                                    |
@@ -171,6 +178,16 @@ Common options:
 - `--draft`: create a draft GitHub PR.
 
 The `run` command reads `.agent-cage.yml` and `.agent-cage.env`, fetches issue context, resolves the target repo, creates a Docker workspace, starts configured Compose services, runs Codex implementation iterations, verifies configured commands, scans the diff for secrets, runs independent review, and publishes a PR when all gates pass.
+
+### Revise a Pull Request
+
+```bash
+agent-cage revise https://github.com/OWNER/REPO/pull/45 --feedback "Keep the old flag working."
+```
+
+`revise` takes an open PR that an Agent Cage run opened, in the same repository, and addresses its feedback: every unresolved review thread, the comments and reviews posted since the last revise, and `--feedback`. It runs the same implement, verify, and review loop on the PR's branch, with the review reading the whole PR against its base. It then pushes one new commit without force, replaces the PR description with the review's, and comments with the feedback it addressed. It leaves review threads unresolved; resolve the ones the commit settles, since the next revise reads every unresolved thread again.
+
+Options: `--feedback <text>`, `--model <model>`, `--run-id <id>`, `--result-json <path>`, and `--verbose`, as for `run`. A PR without a Run ID in its description, from a fork, or closed fails with `pr_not_revisable`; a PR with nothing to address fails with `no_feedback`.
 
 ### Inspect Local Runs
 

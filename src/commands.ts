@@ -4,7 +4,12 @@ import { resolve } from "node:path";
 import { checkIssue, type IssueCheckResult } from "./check.js";
 import { cleanupManagedDockerResources, type CleanupDockerReport } from "./docker.js";
 import { doctorProject, type DoctorResult } from "./doctor.js";
-import { runAgentCage, type RunAgentCageResult, type RunProgressEvent } from "./run.js";
+import {
+  reviseAgentCagePullRequest,
+  runAgentCage,
+  type RunAgentCageResult,
+  type RunProgressEvent,
+} from "./run.js";
 import { RunFailureError } from "./run/errors.js";
 import { setupProject, type SetupResult } from "./setup.js";
 import {
@@ -20,6 +25,7 @@ export const VERBOSE_ENV = "AGENT_CAGE_VERBOSE";
 
 export type CliDependencies = {
   runAgentCage?: typeof runAgentCage;
+  reviseAgentCagePullRequest?: typeof reviseAgentCagePullRequest;
   setupProject?: typeof setupProject;
   doctorProject?: typeof doctorProject;
 };
@@ -27,6 +33,7 @@ export type CliDependencies = {
 export function createCli(dependencies: CliDependencies = {}): Command {
   const program = new Command();
   const run = dependencies.runAgentCage ?? runAgentCage;
+  const revise = dependencies.reviseAgentCagePullRequest ?? reviseAgentCagePullRequest;
   const setup = dependencies.setupProject ?? setupProject;
   const doctor = dependencies.doctorProject ?? doctorProject;
 
@@ -141,68 +148,75 @@ export function createCli(dependencies: CliDependencies = {}): Command {
         command: Command,
       ) => {
         const issueUrl = issueArgument;
-        const stdoutColor = createColorizer(process.stdout);
-        const stderrColor = createColorizer(process.stderr);
 
         if (issueUrl === undefined) {
           command.error("error: missing required issue URL");
         }
 
-        const verbose = options.verbose === true || process.env[VERBOSE_ENV] === "1";
-        let result: RunAgentCageResult;
-        try {
-          result = await run(
-            removeUndefinedProperties({
-              issueUrl,
-              runId: options.runId,
-              repo: options.repo,
-              base: options.base,
-              model: options.model,
-              draft: options.draft,
-              verbose: verbose ? true : undefined,
-            }),
-            {
-              onProgress: (event) => {
-                console.error(formatRunProgressEvent(event, stderrColor));
-              },
-            },
-          );
-        } catch (error) {
-          console.error(
-            stderrColor.failure(error instanceof Error ? error.message : String(error)),
-          );
-          result = {
-            runId: "unstarted",
-            status: "failed",
-            failureCode:
-              error instanceof RunFailureError ? error.failureCode : "internal_error",
-            prUrl: null,
-          };
-        }
+        await executeRunCommand({
+          resultJson: options.resultJson,
+          start: async (onProgress) =>
+            await run(
+              removeUndefinedProperties({
+                issueUrl,
+                runId: options.runId,
+                repo: options.repo,
+                base: options.base,
+                model: options.model,
+                draft: options.draft,
+                verbose: isVerbose(options.verbose) ? true : undefined,
+              }),
+              { onProgress },
+            ),
+        });
+      },
+    );
 
-        console.log(`${stdoutColor.label("Run")}: ${stdoutColor.info(result.runId)}`);
-        console.log(
-          `${stdoutColor.label("Status")}: ${stdoutColor.status(result.status)}`,
-        );
-
-        if (result.failureCode !== null) {
-          console.log(
-            `${stdoutColor.label("Failure")}: ${stdoutColor.failure(result.failureCode)}`,
-          );
-        }
-
-        if (result.prUrl !== null) {
-          console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
-        }
-
-        const resultPath = options.resultJson ?? process.env[RESULT_FILE_ENV];
-        if (resultPath !== undefined && resultPath !== "") {
-          await writeRunResultFile(resultPath, result);
-        }
-
-        if (result.status === "failed") {
-          process.exitCode = 1;
-        }
+  program
+    .command("revise")
+    .description(
+      "Revise an open pull request that Agent Cage opened, from its review threads, comments, and --feedback.",
+    )
+    .argument("<pr-url>", "GitHub pull request URL")
+    .option(
+      "--feedback <text>",
+      "feedback to address besides what the pull request holds",
+    )
+    .option("--model <model>", "implementation agent model override")
+    .option("--run-id <id>", "use a supplied Run identifier")
+    .option(
+      "--result-json <path>",
+      `write the machine-readable run result to <path> (also settable via ${RESULT_FILE_ENV})`,
+    )
+    .option(
+      "--verbose",
+      `stream redacted command output live to stdout (also settable via ${VERBOSE_ENV})`,
+    )
+    .action(
+      async (
+        prUrl: string,
+        options: {
+          feedback?: string;
+          runId?: string;
+          model?: string;
+          resultJson?: string;
+          verbose?: boolean;
+        },
+      ) => {
+        await executeRunCommand({
+          resultJson: options.resultJson,
+          start: async (onProgress) =>
+            await revise(
+              removeUndefinedProperties({
+                prUrl,
+                feedback: options.feedback,
+                runId: options.runId,
+                model: options.model,
+                verbose: isVerbose(options.verbose) ? true : undefined,
+              }),
+              { onProgress },
+            ),
+        });
       },
     );
 
@@ -308,6 +322,62 @@ export function createCli(dependencies: CliDependencies = {}): Command {
     });
 
   return program;
+}
+
+function isVerbose(flag: boolean | undefined): boolean {
+  return flag === true || process.env[VERBOSE_ENV] === "1";
+}
+
+/**
+ * Runs a run-shaped command and reports it: progress on stderr, the result on
+ * stdout, the optional result file, and a non-zero exit code on failure.
+ */
+async function executeRunCommand(input: {
+  resultJson: string | undefined;
+  start: (onProgress: (event: RunProgressEvent) => void) => Promise<RunAgentCageResult>;
+}): Promise<void> {
+  const stdoutColor = createColorizer(process.stdout);
+  const stderrColor = createColorizer(process.stderr);
+  let result: RunAgentCageResult;
+
+  try {
+    result = await input.start((event) => {
+      console.error(formatRunProgressEvent(event, stderrColor));
+    });
+  } catch (error) {
+    console.error(
+      stderrColor.failure(error instanceof Error ? error.message : String(error)),
+    );
+    result = {
+      runId: "unstarted",
+      status: "failed",
+      failureCode:
+        error instanceof RunFailureError ? error.failureCode : "internal_error",
+      prUrl: null,
+    };
+  }
+
+  console.log(`${stdoutColor.label("Run")}: ${stdoutColor.info(result.runId)}`);
+  console.log(`${stdoutColor.label("Status")}: ${stdoutColor.status(result.status)}`);
+
+  if (result.failureCode !== null) {
+    console.log(
+      `${stdoutColor.label("Failure")}: ${stdoutColor.failure(result.failureCode)}`,
+    );
+  }
+
+  if (result.prUrl !== null) {
+    console.log(`${stdoutColor.label("PR")}: ${stdoutColor.link(result.prUrl)}`);
+  }
+
+  const resultPath = input.resultJson ?? process.env[RESULT_FILE_ENV];
+  if (resultPath !== undefined && resultPath !== "") {
+    await writeRunResultFile(resultPath, result);
+  }
+
+  if (result.status === "failed") {
+    process.exitCode = 1;
+  }
 }
 
 function parseOnOff(value: string): boolean {

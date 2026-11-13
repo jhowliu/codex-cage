@@ -9,10 +9,12 @@ import {
   formatPrBody,
   generateBranchName,
   hasPublishableChanges,
+  publishRevision,
   publishSuccessfulRun,
   type CommandResult,
   type CommandRunner,
 } from "../src/publish.js";
+import { parseReviseMarker, type RevisionContext } from "../src/pull-request.js";
 import type { GithubRepo } from "../src/repo.js";
 
 type RecordedCall = {
@@ -321,5 +323,145 @@ test("publishSuccessfulRun fails branch collisions without force pushing", async
     ),
     false,
   );
+  assert.equal(gh.calls.length, 0);
+});
+
+const revision: RevisionContext = {
+  pullRequest: {
+    url: "https://github.com/jhowliu/agent-cage/pull/40",
+    number: 40,
+    repo,
+    title: "#11 Publish successful runs",
+    body: "Old description.",
+    headBranch: "agent-cage/gh-11-run-abc",
+    baseBranch: "main",
+    agentCageRunId: "run-old",
+    issueUrl: githubIssue.url,
+  },
+  feedback: [
+    {
+      kind: "review_thread",
+      path: "src/publish.ts",
+      line: 12,
+      outdated: false,
+      comments: [{ author: "alice", body: "Rename.", createdAt: "2026-11-12T00:00:00Z" }],
+    },
+    { kind: "command_line", body: "Keep the flag." },
+  ],
+  feedbackThrough: "2026-11-12T00:00:00Z",
+};
+
+test("publishRevision pushes one commit to the PR branch, rewrites the body, and comments with a marker", async () => {
+  const git = recordingRunner([
+    result(" M src/publish.ts\n"),
+    result(),
+    result(),
+    result(),
+    result(),
+    result("abc1234\n"),
+    result(),
+  ]);
+  const gh = recordingRunner([result(), result()]);
+
+  const published = await publishRevision({
+    cwd: "/repo",
+    issue: githubIssue,
+    revision,
+    authorName: "Agent Cage",
+    authorEmail: "agent-cage@users.noreply.github.com",
+    env: { GITHUB_TOKEN: "token" },
+    metadata: { ...metadata, runId: "run-revise" },
+    git,
+    gh,
+  });
+
+  assert.deepEqual(
+    git.calls.map((call) => call.args),
+    [
+      ["status", "--porcelain"],
+      ["config", "user.name", "Agent Cage"],
+      ["config", "user.email", "agent-cage@users.noreply.github.com"],
+      ["add", "--all"],
+      ["commit", "-m", "#11 Address pull request feedback"],
+      ["rev-parse", "--short", "HEAD"],
+      ["push", "origin", "HEAD:refs/heads/agent-cage/gh-11-run-abc"],
+    ],
+  );
+  assert.ok(git.calls.every((call) => !call.args.some((arg) => arg.includes("force"))));
+
+  const [edit, commentCall] = gh.calls.map((call) => call.args);
+  assert.deepEqual(edit?.slice(0, 4), [
+    "api",
+    "--method",
+    "PATCH",
+    "repos/jhowliu/agent-cage/pulls/40",
+  ]);
+  assert.match(edit?.[5] ?? "", /^body=Adds the publish flow\./);
+  assert.match(edit?.[5] ?? "", /- Run ID: run-revise/);
+  assert.deepEqual(commentCall?.slice(0, 4), [
+    "api",
+    "--method",
+    "POST",
+    "repos/jhowliu/agent-cage/issues/40/comments",
+  ]);
+  const commentBody = (commentCall?.[5] ?? "").replace(/^body=/, "");
+  assert.deepEqual(parseReviseMarker(commentBody), {
+    runId: "run-revise",
+    through: "2026-11-12T00:00:00Z",
+  });
+  assert.match(commentBody, /with commit abc1234/);
+  assert.match(commentBody, /- Review thread on `src\/publish.ts:12` from alice/);
+  assert.match(commentBody, /- Feedback given on the command line/);
+  assert.equal(published.prUrl, revision.pullRequest.url);
+  assert.equal(published.branchName, "agent-cage/gh-11-run-abc");
+});
+
+test("publishRevision keeps the PR body when the review wrote no description", async () => {
+  const git = recordingRunner([
+    result(" M src/publish.ts\n"),
+    result(),
+    result(),
+    result(),
+    result(),
+    result("abc1234\n"),
+    result(),
+  ]);
+  const gh = recordingRunner([result()]);
+
+  const published = await publishRevision({
+    cwd: "/repo",
+    issue: githubIssue,
+    revision,
+    authorName: "Agent Cage",
+    authorEmail: "agent-cage@users.noreply.github.com",
+    metadata: { ...metadata, description: null },
+    git,
+    gh,
+  });
+
+  assert.equal(gh.calls.length, 1);
+  assert.equal(gh.calls[0]?.args[3], "repos/jhowliu/agent-cage/issues/40/comments");
+  assert.equal(published.prBody, "Old description.");
+});
+
+test("publishRevision rejects a revision without changes before committing", async () => {
+  const git = recordingRunner([result("")]);
+  const gh = recordingRunner([]);
+
+  await assert.rejects(
+    () =>
+      publishRevision({
+        cwd: "/repo",
+        issue: githubIssue,
+        revision,
+        authorName: "Agent Cage",
+        authorEmail: "agent-cage@users.noreply.github.com",
+        metadata,
+        git,
+        gh,
+      }),
+    NoDiffError,
+  );
+  assert.equal(git.calls.length, 1);
   assert.equal(gh.calls.length, 0);
 });

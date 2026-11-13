@@ -21,12 +21,14 @@ import { ghTokenLookup, type GithubTokenLookup } from "./github-auth.js";
 import { fetchIssueContext } from "./issue.js";
 import { generateBranchName, type publishSuccessfulRun } from "./publish.js";
 import { buildPromptContext } from "./prompt-context.js";
+import { fetchRevision } from "./pull-request.js";
 import { createAuthenticatedRepo, resolveTargetRepo } from "./repo.js";
 import type { runIndependentReview } from "./review.js";
 import { RunFailureError } from "./run/errors.js";
 import type { RunEvent, RunEventSink } from "./run/events.js";
 import { openRunStore } from "./state.js";
 import type { createHostShellRunner, createHostWorkspace } from "./sandbox-execution.js";
+import type { publishRevision } from "./publish.js";
 import {
   runWorkflow,
   type RunAgentCageResult,
@@ -48,8 +50,18 @@ export type RunCommandOptions = {
   verbose?: boolean | undefined;
 };
 
+export type ReviseCommandOptions = {
+  cwd?: string;
+  prUrl: string;
+  feedback?: string | undefined;
+  runId?: string | undefined;
+  model?: string | undefined;
+  verbose?: boolean | undefined;
+};
+
 export type RunAgentCageDependencies = {
   fetchIssueContext?: typeof fetchIssueContext;
+  fetchRevision?: typeof fetchRevision;
   resolveTargetRepo?: typeof resolveTargetRepo;
   createAuthenticatedRepo?: typeof createAuthenticatedRepo;
   readEnv?: (cwd: string) => Promise<Record<string, string>>;
@@ -65,6 +77,7 @@ export type RunAgentCageDependencies = {
   createComposeProject?: typeof createComposeProject;
   runIndependentReview?: typeof runIndependentReview;
   publishSuccessfulRun?: typeof publishSuccessfulRun;
+  publishRevision?: typeof publishRevision;
   generateRunId?: () => string;
   findCodexAuthFile?: typeof findCodexAuthFile;
   findGithubToken?: GithubTokenLookup;
@@ -83,6 +96,28 @@ export async function runAgentCage(
 ): Promise<RunAgentCageResult> {
   const cwd = options.cwd ?? process.cwd();
   const context = await prepareRuntimeContext(cwd, options, dependencies);
+  return await executeRun(cwd, context, dependencies);
+}
+
+/**
+ * Revises an open pull request that an Agent Cage run opened: the same
+ * implement, verify and review loop on the pull request's branch, driven by
+ * its unresolved review threads, new comments, and --feedback.
+ */
+export async function reviseAgentCagePullRequest(
+  options: ReviseCommandOptions,
+  dependencies: RunAgentCageDependencies = {},
+): Promise<RunAgentCageResult> {
+  const cwd = options.cwd ?? process.cwd();
+  const context = await prepareRevisionContext(cwd, options, dependencies);
+  return await executeRun(cwd, context, dependencies);
+}
+
+async function executeRun(
+  cwd: string,
+  context: RuntimeContext,
+  dependencies: RunAgentCageDependencies,
+): Promise<RunAgentCageResult> {
   const openStore = dependencies.openRunStore ?? openRunStore;
   const store = await openStore(cwd);
 
@@ -114,6 +149,9 @@ export async function runAgentCage(
       ...(dependencies.publishSuccessfulRun === undefined
         ? {}
         : { publishSuccessfulRun: dependencies.publishSuccessfulRun }),
+      ...(dependencies.publishRevision === undefined
+        ? {}
+        : { publishRevision: dependencies.publishRevision }),
       ...(dependencies.onProgress === undefined
         ? {}
         : { onProgress: dependencies.onProgress }),
@@ -124,17 +162,102 @@ export async function runAgentCage(
   }
 }
 
+type RunFoundation = Pick<
+  RuntimeContext,
+  | "cwd"
+  | "config"
+  | "configWarnings"
+  | "credentials"
+  | "agents"
+  | "runId"
+  | "runtimeImage"
+  | "promptContext"
+  | "executionMode"
+  | "verbose"
+>;
+
 async function prepareRuntimeContext(
   cwd: string,
   options: RunCommandOptions,
   dependencies: RunAgentCageDependencies,
 ): Promise<RuntimeContext> {
-  const configResult = await readConfig(cwd);
-  const readEnv = dependencies.readEnv ?? readRunEnv;
+  const foundation = await prepareRunFoundation(cwd, options, dependencies);
+  const { config, credentials } = foundation;
   const fetchContext = dependencies.fetchIssueContext ?? fetchIssueContext;
   const resolveRepo = dependencies.resolveTargetRepo ?? resolveTargetRepo;
   const authenticateRepo =
     dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
+  const issue = await fetchContext(
+    options.issueUrl,
+    credentials.issueOptions(config.issue.comments),
+  );
+  const repoInput: Parameters<typeof resolveTargetRepo>[0] = {
+    issue,
+    cwd,
+  };
+
+  if (options.repo !== undefined) {
+    repoInput.explicitRepo = options.repo;
+  }
+
+  const repoResolution = await resolveRepo(repoInput);
+
+  return {
+    ...foundation,
+    issue,
+    repoResolution,
+    authenticatedRepo: authenticateRepo(repoResolution.repo, credentials.githubToken()),
+    baseBranch: options.base ?? config.git.base,
+    draft: options.draft ?? config.pr.draft,
+    branchName: generateBranchName({ issue, runId: foundation.runId }),
+    revision: null,
+  };
+}
+
+async function prepareRevisionContext(
+  cwd: string,
+  options: ReviseCommandOptions,
+  dependencies: RunAgentCageDependencies,
+): Promise<RuntimeContext> {
+  const foundation = await prepareRunFoundation(cwd, options, dependencies);
+  const { config, credentials } = foundation;
+  const fetchContext = dependencies.fetchIssueContext ?? fetchIssueContext;
+  const readRevision = dependencies.fetchRevision ?? fetchRevision;
+  const authenticateRepo =
+    dependencies.createAuthenticatedRepo ?? createAuthenticatedRepo;
+  const revision = await readRevision(options.prUrl, {
+    githubToken: credentials.githubToken(),
+    commandLineFeedback: options.feedback,
+  });
+  const pullRequest = revision.pullRequest;
+  const issue = await fetchContext(
+    pullRequest.issueUrl,
+    credentials.issueOptions(config.issue.comments),
+  );
+
+  return {
+    ...foundation,
+    issue,
+    repoResolution: { repo: pullRequest.repo, source: "pull_request" },
+    authenticatedRepo: authenticateRepo(pullRequest.repo, credentials.githubToken()),
+    baseBranch: pullRequest.baseBranch,
+    draft: config.pr.draft,
+    branchName: pullRequest.headBranch,
+    revision,
+  };
+}
+
+async function prepareRunFoundation(
+  cwd: string,
+  options: {
+    model?: string | undefined;
+    runId?: string | undefined;
+    verbose?: boolean | undefined;
+  },
+  dependencies: RunAgentCageDependencies,
+): Promise<RunFoundation> {
+  const configResult = await readConfig(cwd);
+  const readEnv = dependencies.readEnv ?? readRunEnv;
   const locateCodexAuthFile = dependencies.findCodexAuthFile ?? findCodexAuthFile;
   const agentConfig = configResult.config.agent;
   const agents: AgentAssignments = {
@@ -151,28 +274,7 @@ async function prepareRuntimeContext(
     findCodexAuthFile: locateCodexAuthFile,
     findGithubToken: dependencies.findGithubToken ?? ghTokenLookup,
   });
-  const issue = await fetchContext(
-    options.issueUrl,
-    credentials.issueOptions(configResult.config.issue.comments),
-  );
-  const repoInput: Parameters<typeof resolveTargetRepo>[0] = {
-    issue,
-    cwd,
-  };
-
-  if (options.repo !== undefined) {
-    repoInput.explicitRepo = options.repo;
-  }
-
-  const repoResolution = await resolveRepo(repoInput);
-  const authenticatedRepo = authenticateRepo(
-    repoResolution.repo,
-    credentials.githubToken(),
-  );
-  const baseBranch = options.base ?? configResult.config.git.base;
-  const draft = options.draft ?? configResult.config.pr.draft;
   const runId = options.runId ?? dependencies.generateRunId?.() ?? generateRunId();
-  const branchName = generateBranchName({ issue, runId });
   const runtimeImage = {
     image: configResult.config.runtime.image,
     dockerfilePath: "",
@@ -192,14 +294,8 @@ async function prepareRuntimeContext(
     config: configResult.config,
     configWarnings: configResult.warnings,
     credentials,
-    issue,
-    repoResolution,
-    authenticatedRepo,
-    baseBranch,
     agents,
-    draft,
     runId,
-    branchName,
     runtimeImage,
     promptContext,
     executionMode,

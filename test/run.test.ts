@@ -13,11 +13,14 @@ import type { IssueContext } from "../src/issue.js";
 import {
   NoDiffError,
   type CommandResult,
+  type PublishRevisionInput,
   type PublishSuccessfulRunInput,
 } from "../src/publish.js";
+import type { RevisionContext } from "../src/pull-request.js";
 import type { GithubRepo, RepoResolution } from "../src/repo.js";
 import type { ReviewReport, RunIndependentReviewResult } from "../src/review.js";
 import {
+  reviseAgentCagePullRequest,
   runAgentCage,
   type RunAgentCageDependencies,
   type RunProgressEvent,
@@ -1656,4 +1659,149 @@ test("runAgentCage reports an unsupported review model as agent_model_unavailabl
     failureCode: "agent_model_unavailable",
     lastPhase: "review",
   });
+});
+
+test("reviseAgentCagePullRequest revises the PR branch from its feedback and publishes a revision", async () => {
+  const cwd = await createProject(`
+verify:
+  - npm test
+`);
+  const events: string[] = [];
+  const shell = happyPathShell();
+  const revision: RevisionContext = {
+    pullRequest: {
+      url: "https://github.com/jhowliu/agent-cage/pull/40",
+      number: 40,
+      repo,
+      title: "#26 Wire run command",
+      body: "Old description.",
+      headBranch: "agent-cage/gh-26-run-abc",
+      baseBranch: "release",
+      agentCageRunId: "run-old",
+      issueUrl: issue.url,
+    },
+    feedback: [
+      {
+        kind: "review_thread",
+        path: "src/app.ts",
+        line: 2,
+        outdated: false,
+        comments: [
+          {
+            author: "alice",
+            body: "Name this better.",
+            createdAt: "2026-11-12T00:00:00Z",
+          },
+        ],
+      },
+      { kind: "command_line", body: "Keep the export." },
+    ],
+    feedbackThrough: "2026-11-12T00:00:00Z",
+  };
+  const revisionCalls: Array<{ prUrl: string; feedback: string | undefined }> = [];
+  const issueUrls: string[] = [];
+  const reviewInputs: Array<{ issueContext: string }> = [];
+  const published: PublishRevisionInput[] = [];
+
+  try {
+    const result = await reviseAgentCagePullRequest(
+      {
+        cwd,
+        prUrl: "https://github.com/jhowliu/agent-cage/pull/40",
+        feedback: "Keep the export.",
+      },
+      {
+        generateRunId: () => "run-revise",
+        readEnv: async () => ({ GITHUB_TOKEN: "token-value" }),
+        findCodexAuthFile: async () => null,
+        fetchRevision: async (prUrl, options) => {
+          revisionCalls.push({ prUrl, feedback: options?.commandLineFeedback });
+          return revision;
+        },
+        fetchIssueContext: async (url) => {
+          issueUrls.push(url);
+          return issue;
+        },
+        createAuthenticatedRepo: () => ({
+          repo,
+          cloneUrl: "https://github.com/jhowliu/agent-cage.git",
+          redactedCloneUrl: "https://github.com/jhowliu/agent-cage.git",
+        }),
+        runIndependentReview: async (input) => {
+          reviewInputs.push({ issueContext: input.issueContext });
+          return passingReview("Renames the export.");
+        },
+        publishSuccessfulRun: async () => {
+          throw new Error("A revision must not open a new pull request.");
+        },
+        publishRevision: async (input) => {
+          published.push(input);
+          return {
+            branchName: input.revision.pullRequest.headBranch,
+            commitMessage: "#26 Address pull request feedback",
+            prTitle: input.revision.pullRequest.title,
+            prBody: "body",
+            prUrl: input.revision.pullRequest.url,
+          };
+        },
+        ...modeDeps("docker", shell, events),
+      },
+    );
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.prUrl, "https://github.com/jhowliu/agent-cage/pull/40");
+    assert.deepEqual(revisionCalls, [
+      {
+        prUrl: "https://github.com/jhowliu/agent-cage/pull/40",
+        feedback: "Keep the export.",
+      },
+    ]);
+    assert.deepEqual(issueUrls, [issue.url]);
+
+    assert.ok(
+      shell.commands.includes(
+        "git fetch origin 'release' 'agent-cage/gh-26-run-abc' && git checkout -B 'agent-cage/gh-26-run-abc' 'origin/agent-cage/gh-26-run-abc'",
+      ),
+    );
+    assert.ok(
+      shell.commands.some((command) =>
+        command.endsWith("git diff --binary --merge-base 'origin/release'"),
+      ),
+    );
+    assert.ok(
+      !shell.commands.some((command) => command.endsWith("git diff --binary HEAD")),
+    );
+
+    const implementCommand =
+      shell.commands.find((command) => command.includes("codex exec")) ?? "";
+    assert.match(implementCommand, /Revise the pull request below/);
+    assert.match(implementCommand, /Review thread on `src\/app.ts:2`/);
+    assert.match(implementCommand, /Keep the export\./);
+
+    assert.match(
+      reviewInputs[0]?.issueContext ?? "",
+      /whole pull request against release/,
+    );
+    assert.match(reviewInputs[0]?.issueContext ?? "", /Name this better\./);
+
+    assert.equal(published.length, 1);
+    assert.equal(published[0]?.metadata.description, "Renames the export.");
+    assert.equal(published[0]?.metadata.runId, "run-revise");
+
+    const store = await openRunStore(cwd);
+    const details = store.getRunDetails("run-revise");
+    store.close();
+    assert.equal(details.run.branch, "agent-cage/gh-26-run-abc");
+    assert.equal(details.run.baseBranch, "release");
+    assert.equal(details.run.prUrl, "https://github.com/jhowliu/agent-cage/pull/40");
+    const recorded = JSON.parse(
+      await readFile(
+        join(cwd, ".agent-cage", "runs", "run-revise", "revision.json"),
+        "utf8",
+      ),
+    ) as RevisionContext;
+    assert.equal(recorded.pullRequest.url, revision.pullRequest.url);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
