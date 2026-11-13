@@ -50,3 +50,25 @@
 
 - Keep tests close to behavior. For new run orchestration paths, add focused unit tests around command options, artifacts, status transitions, and failure codes.
 - Run `npm run typecheck` and `npm test` for TypeScript changes. Run `npm run format` or a targeted Prettier check for touched files when repo-wide format is blocked by unrelated local files.
+
+## Pull Requests
+
+Every PR description has a **Change map** and a **How to use** section. Agent Cage's review agent writes the descriptions of the PRs that Agent Cage runs open by these rules, and Agent Cage appends its Verification, Review, Risks, Run and Issue sections after them.
+
+### Change map
+
+- **Header**: `<base> (sha) → <branch> (sha) · N files · +X −Y`, counted with `git diff --numstat <base>...HEAD`. Before the branch exists, as in an Agent Cage review, write `<base> (sha) → working tree` and count from the diff under review.
+- **Interfaces**: the public contracts the change touches, such as CLI commands and options, config file schema, HTTP routes, events, and types or functions imported across files. Find them by reading the code and the diff. Write "None" when there are none.
+- **Flows**: one Mermaid `sequenceDiagram` per entry point (command, key, route, event) that reaches changed code.
+  - Participants are the user, the modules that hold the interfaces, and external programs.
+  - Messages follow the real call order and name the function and the key data it passes.
+  - Use `alt` / `opt` for branches and `loop` for loops.
+  - Wrap changed steps in `rect rgba(240, 140, 0, 0.15)` and new steps in `rect rgba(47, 158, 68, 0.15)`.
+  - Keep `;` out of messages, since it ends a Mermaid statement.
+  - Flows are read from the code and can miss dynamic calls. They help reading; they do not verify anything.
+- **Changed functions**: changed functions that no flow shows, or "None".
+- **Files**: a table of status, +/− and path, from `git diff --numstat` and `--name-status`, inside `<details>`.
+
+### How to use
+
+How a reviewer tries the change: the command that starts it, the keys to press or commands to run, and what they should see. When nothing changes for users, say so and name how to verify the change, such as the tests to run.
