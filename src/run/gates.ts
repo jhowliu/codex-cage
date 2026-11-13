@@ -166,6 +166,7 @@ export async function runPublishGate(input: {
   redactor: (input: string) => string;
   publish: typeof publishSuccessfulRun;
   verification: Extract<VerificationResult, { passed: true }>;
+  description: string | null;
 }): Promise<PublishSuccessfulRunResult> {
   await input.journal.setRunStatus("creating_pr");
   // Publishing commits the workspace; reading HEAD's diff afterwards loses the
@@ -191,7 +192,7 @@ export async function runPublishGate(input: {
         env: publishCredentials.env,
         metadata: {
           runId: input.context.runId,
-          summary: `Implemented ${input.context.issue.identifier}: ${input.context.issue.title}`,
+          description: input.description,
           verification: input.verification.items,
           reviewStatus: "Independent review passed.",
           risks: [],

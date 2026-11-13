@@ -73,7 +73,9 @@ const linearIssue: IssueContext = {
 
 const metadata = {
   runId: "run-1234567890abcdef",
-  summary: "Implemented publish flow.",
+  description: "Adds the publish flow.\n\n## How to use\n\nRun `agent-cage run`." as
+    | string
+    | null,
   verification: ["npm test", "npm run format"],
   reviewStatus: "Independent review passed.",
   risks: ["GitHub API unavailable would fail publishing."],
@@ -90,14 +92,30 @@ test("generateBranchName creates run-specific branch names", () => {
   );
 });
 
-test("formatPrBody includes summary, verification, review, risks, run id, and GitHub closing keyword", () => {
+test("formatPrBody opens with the review's description, then verification, review, risks, run id, and GitHub closing keyword", () => {
   const body = formatPrBody({ issue: githubIssue, metadata });
 
-  assert.match(body, /## Summary\nImplemented publish flow/);
+  assert.ok(
+    body.startsWith(
+      "Adds the publish flow.\n\n## How to use\n\nRun `agent-cage run`.\n\n## Verification\n",
+    ),
+  );
   assert.match(body, /- npm test/);
   assert.match(body, /Independent review passed/);
   assert.match(body, /GitHub API unavailable/);
   assert.match(body, /Run ID: run-1234567890abcdef/);
+  assert.match(body, /Closes #11/);
+});
+
+test("formatPrBody falls back to a one-line summary without a review description", () => {
+  const body = formatPrBody({
+    issue: githubIssue,
+    metadata: { ...metadata, description: null },
+  });
+
+  assert.ok(
+    body.startsWith(`Implemented #11: ${githubIssue.title}\n\n## Verification\n`),
+  );
   assert.match(body, /Closes #11/);
 });
 
