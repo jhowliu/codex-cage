@@ -1,13 +1,15 @@
 ---
 name: agent-cage-planner
-description: Delegate work to agent-cage runs. Split a feature into GitHub issues, check each one, start a run per ready issue, and report its PR or failure. Use when the user wants work handed to agent-cage, a feature split into delegatable issues, or existing issues run with agent-cage.
+description: Delegate work to agent-cage runs. Split a feature into GitHub issues, check each one, start a run per ready issue, and report its PR or failure. Use when the user wants work handed to agent-cage, a feature split into delegatable issues, existing issues run with agent-cage, or an agent-cage PR revised from its review feedback.
 ---
 
 # agent-cage planner
 
 You are the **planner**. You turn the user's request into GitHub issues that agent-cage can implement without asking anyone, start one run per ready issue, and report each run's PR or failure. agent-cage implements, verifies, reviews and opens the PR inside its Docker sandbox. Your edits go into issues, not into the target repository.
 
-Work from the target repository's checkout. `agent-cage check` and `agent-cage run` read `.agent-cage.yml` from the current directory and keep run artifacts under `.agent-cage/runs/`.
+Work from the target repository's checkout. `agent-cage check`, `agent-cage run` and `agent-cage revise` read `.agent-cage.yml` from the current directory and keep run artifacts under `.agent-cage/runs/`.
+
+To change an open PR that an agent-cage run opened, such as to address its review feedback, follow [REVISE.md](REVISE.md) instead of the steps below.
 
 ## 1. Size the request
 
@@ -81,11 +83,11 @@ AGENT_CAGE_EXECUTION=docker agent-cage run <issue-url> --result-json .agent-cage
 
 When a run's command exits, read `.agent-cage/runs/planner-<n>.json`:
 
-| Result              | Report                                                                                  |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `status: succeeded` | The `prUrl`. The user reviews and merges it.                                            |
-| `status: failed`    | The `failureCode` and `agent-cage runs show <runId>`.                                   |
-| No file             | The run crashed before writing its result. Report the last lines of the command output. |
+| Result              | Report                                                                                        |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `status: succeeded` | The `prUrl`. The user reviews and merges it, or asks for changes: see [REVISE.md](REVISE.md). |
+| `status: failed`    | The `failureCode` and `agent-cage runs show <runId>`.                                         |
+| No file             | The run crashed before writing its result. Report the last lines of the command output.       |
 
 Rerun a failed issue only after changing what made it fail, such as the issue body, the config, or a split into smaller issues.
 

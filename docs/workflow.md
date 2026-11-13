@@ -232,7 +232,9 @@ From the target repository's checkout, ask the agent to delegate a feature or a 
 4. Starts `agent-cage run` for every ready issue in parallel as background commands, always in Docker mode.
 5. Reports each run's PR URL, or its failure code and `agent-cage runs show <run-id>`.
 
-Each run writes its result to `.agent-cage/runs/planner-<issue-number>.json` with `run --result-json`, for the skill to read. `.agent-cage/runs/` is already ignored by Git. Other tools follow runs with `agent-cage runs list --json`, which covers every run, however it was started.
+To change a PR a run opened, ask the agent to address its review feedback. The skill sorts the feedback into a revise, a follow-up issue, or a rerun of a rewritten issue. It asks about one-way doors a reviewer left in a comment, since a revise follows the feedback over the issue. Then it runs `agent-cage revise <pr-url>` with `--feedback` for what only the conversation holds.
+
+Each run writes its result to `.agent-cage/runs/planner-<issue-number>.json` with `run --result-json`, and each revise to `.agent-cage/runs/planner-pr-<pr-number>.json`, for the skill to read. `.agent-cage/runs/` is already ignored by Git. Other tools follow runs with `agent-cage runs list --json`, which covers every run, however it was started.
 
 ## Docker Compose Services
 

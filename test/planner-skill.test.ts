@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import test from "node:test";
 import type { Command } from "commander";
 import { createCli } from "../src/commands.js";
 import { AGENT_CAGE_EXECUTION_ENV } from "../src/config.js";
 
-const skillUrl = new URL("../../skills/agent-cage-planner/SKILL.md", import.meta.url);
+const skillDirectory = new URL("../../skills/agent-cage-planner/", import.meta.url);
+
+/** Every Markdown file of the skill, keyed by file name. */
+async function readSkillFiles(): Promise<Map<string, string>> {
+  const names = (await readdir(skillDirectory)).filter((name) => name.endsWith(".md"));
+  const files = new Map<string, string>();
+  for (const name of names) {
+    files.set(name, await readFile(new URL(name, skillDirectory), "utf8"));
+  }
+  return files;
+}
 
 /** The code spans and fenced code blocks of a Markdown document. */
 function codeIn(markdown: string): string[] {
@@ -28,7 +38,7 @@ function cliInvocations(code: readonly string[]): string[][] {
 }
 
 test("the planner skill uses only agent-cage commands and options that exist", async () => {
-  const skill = await readFile(skillUrl, "utf8");
+  const skill = [...(await readSkillFiles()).values()].join("\n");
   const invocations = cliInvocations(codeIn(skill));
   assert.ok(invocations.length > 0, "the skill should run agent-cage commands");
 
@@ -56,8 +66,25 @@ test("the planner skill uses only agent-cage commands and options that exist", a
   }
 });
 
-test("the planner skill pins runs to Docker with the variable run reads", async () => {
-  const skill = await readFile(skillUrl, "utf8");
+test("the planner skill pins runs and revises to Docker with the variable they read", async () => {
+  const files = await readSkillFiles();
 
-  assert.match(skill, new RegExp(`${AGENT_CAGE_EXECUTION_ENV}=docker agent-cage run `));
+  assert.match(
+    files.get("SKILL.md") ?? "",
+    new RegExp(`${AGENT_CAGE_EXECUTION_ENV}=docker agent-cage run `),
+  );
+  assert.match(
+    files.get("REVISE.md") ?? "",
+    new RegExp(`${AGENT_CAGE_EXECUTION_ENV}=docker agent-cage revise `),
+  );
+});
+
+test("the planner skill links only to files it ships", async () => {
+  const files = await readSkillFiles();
+
+  for (const [name, markdown] of files) {
+    for (const match of markdown.matchAll(/\]\(([^)#\s]+\.md)\)/g)) {
+      assert.ok(files.has(match[1] ?? ""), `${name} links to missing ${match[1]}`);
+    }
+  }
 });
