@@ -227,7 +227,7 @@ For another agent, link the same folder into that agent's skills directory.
 From the target repository's checkout, ask the agent to delegate a feature or a list of issues to agent-cage. The skill:
 
 1. Sizes the request and asks only about one-way-door decisions, such as public interfaces and data formats.
-2. Writes one issue per task with the `## What to build`, `## Acceptance criteria`, and `## Blocked by` sections.
+2. Writes one issue per task with the `## What to build`, `## Acceptance criteria`, and `## Blocked by` sections. Issues that will change the same file are chained through `## Blocked by`, so their PRs do not conflict.
 3. Runs `agent-cage check` on each issue. An issue with an open blocker waits until the blocker's PR merges.
 4. Starts `agent-cage run` for every ready issue in parallel as background commands, always in Docker mode.
 5. Reports each run's PR URL, or its failure code and `agent-cage runs show <run-id>`.
