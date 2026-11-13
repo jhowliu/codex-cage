@@ -330,6 +330,8 @@ For automation, `agent-cage run` emits a deterministic outcome so a workflow can
 | `secret_guard_failed`, `no_diff`    | The diff still contained a secret after `guards.max_secret_fix_attempts`, or was empty.                                         |
 | `timeout`                           | A command exceeded `timeouts.command_minutes`, `idle_minutes`, or `total_minutes`.                                              |
 | `pr_failed`                         | Pushing the branch or opening the pull request failed.                                                                          |
+| `pr_not_revisable`                  | `revise` got a pull request that is closed, comes from a fork, or has no Run ID or issue link in its description.               |
+| `no_feedback`                       | `revise` found no unresolved review thread, no new comment or review, and no `--feedback`.                                      |
 | `internal_error`                    | An unexpected error in Agent Cage itself. The run's `summary.md` holds the details.                                             |
 
 ## GitHub Actions Automation

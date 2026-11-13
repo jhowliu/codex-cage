@@ -6,6 +6,7 @@ import {
 } from "../guards.js";
 import {
   NoDiffError,
+  publishRevision,
   publishSuccessfulRun,
   type PublishSuccessfulRunResult,
 } from "../publish.js";
@@ -135,7 +136,7 @@ export async function runReviewGate(input: {
       verificationSummary: input.verification.summary,
       reviewPolicyStatus,
       resultMetadata,
-      readCurrentDiff: async () => await readCurrentDiff(input.shell),
+      readCurrentDiff: async () => await readRunDiff(input.shell, input.context),
       runner: createReviewAgentRunner(
         input.shell,
         reviewCredentials,
@@ -165,6 +166,7 @@ export async function runPublishGate(input: {
   shell: ShellRunner;
   redactor: (input: string) => string;
   publish: typeof publishSuccessfulRun;
+  revise: typeof publishRevision;
   verification: Extract<VerificationResult, { passed: true }>;
   description: string | null;
 }): Promise<PublishSuccessfulRunResult> {
@@ -173,33 +175,41 @@ export async function runPublishGate(input: {
   // very changes that the results view and final artifact need to show.
   await input.journal.writeArtifact(
     "final.patch",
-    input.redactor(await readCurrentDiff(input.shell)),
+    input.redactor(await readRunDiff(input.shell, input.context)),
   );
   const publishResult = await input.journal.runPhase("pr", async () => {
     let result;
     const publishCredentials = input.context.credentials.command("publish");
 
+    const shared = {
+      cwd: input.context.cwd,
+      issue: input.context.issue,
+      authorName: input.context.config.git.author_name,
+      authorEmail: input.context.config.git.author_email,
+      env: publishCredentials.env,
+      metadata: {
+        runId: input.context.runId,
+        description: input.description,
+        verification: input.verification.items,
+        reviewStatus: "Independent review passed.",
+        risks: [],
+      },
+      git: createGitCommandRunner(input.shell, publishCredentials),
+      gh: createGhCommandRunner(input.shell, publishCredentials),
+    };
+    const revision = input.context.revision;
+
     try {
-      result = await input.publish({
-        cwd: input.context.cwd,
-        repo: input.context.repoResolution.repo,
-        issue: input.context.issue,
-        baseBranch: input.context.baseBranch,
-        authorName: input.context.config.git.author_name,
-        authorEmail: input.context.config.git.author_email,
-        branchName: input.context.branchName,
-        draft: input.context.draft,
-        env: publishCredentials.env,
-        metadata: {
-          runId: input.context.runId,
-          description: input.description,
-          verification: input.verification.items,
-          reviewStatus: "Independent review passed.",
-          risks: [],
-        },
-        git: createGitCommandRunner(input.shell, publishCredentials),
-        gh: createGhCommandRunner(input.shell, publishCredentials),
-      });
+      result =
+        revision === null
+          ? await input.publish({
+              ...shared,
+              repo: input.context.repoResolution.repo,
+              baseBranch: input.context.baseBranch,
+              branchName: input.context.branchName,
+              draft: input.context.draft,
+            })
+          : await input.revise({ ...shared, revision });
     } catch (error) {
       if (error instanceof NoDiffError) {
         throw error;
@@ -217,6 +227,19 @@ export async function runPublishGate(input: {
   await input.journal.writeJsonArtifact("pr.json", publishResult);
 
   return publishResult;
+}
+
+/**
+ * Reads the change the run produced. A revision reviews the whole pull
+ * request, so its diff starts at the merge base with the base branch.
+ */
+export async function readRunDiff(
+  shell: ShellRunner,
+  context: RuntimeContext,
+): Promise<string> {
+  return context.revision === null
+    ? await readCurrentDiff(shell)
+    : await readCurrentDiff(shell, `origin/${context.baseBranch}`);
 }
 
 function formatError(error: unknown): string {

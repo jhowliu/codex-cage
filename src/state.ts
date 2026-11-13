@@ -53,6 +53,8 @@ export const failureCodes = [
   "no_diff",
   "timeout",
   "pr_failed",
+  "pr_not_revisable",
+  "no_feedback",
   "internal_error",
 ] as const;
 

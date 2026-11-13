@@ -50,6 +50,6 @@ export function readOptionalString(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-function isBotComment(comment: RawIssueComment): boolean {
+export function isBotComment(comment: RawIssueComment): boolean {
   return comment.authorType === "Bot" || knownBotNamePattern.test(comment.author);
 }

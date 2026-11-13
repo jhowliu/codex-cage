@@ -16,7 +16,7 @@ export type RepoResolutionInput = {
 
 export type RepoResolution = {
   repo: GithubRepo;
-  source: "explicit" | "issue" | "cwd";
+  source: "explicit" | "issue" | "cwd" | "pull_request";
 };
 
 export type GitRemoteReader = {

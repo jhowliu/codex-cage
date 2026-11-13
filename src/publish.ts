@@ -3,6 +3,11 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { IssueContext } from "./issue.js";
+import {
+  describeFeedback,
+  formatReviseMarker,
+  type RevisionContext,
+} from "./pull-request.js";
 import type { GithubRepo } from "./repo.js";
 
 export type CommandResult = {
@@ -39,6 +44,18 @@ export type PublishSuccessfulRunInput = {
   metadata: PublishMetadata;
   branchName?: string | undefined;
   draft?: boolean | undefined;
+  env?: Record<string, string> | undefined;
+  git?: CommandRunner | undefined;
+  gh?: CommandRunner | undefined;
+};
+
+export type PublishRevisionInput = {
+  cwd: string;
+  issue: IssueContext;
+  revision: RevisionContext;
+  authorName: string;
+  authorEmail: string;
+  metadata: PublishMetadata;
   env?: Record<string, string> | undefined;
   git?: CommandRunner | undefined;
   gh?: CommandRunner | undefined;
@@ -147,6 +164,117 @@ export async function publishSuccessfulRun(
     prBody,
     prUrl,
   };
+}
+
+/**
+ * Publishes a revise run: one new commit pushed to the pull request's branch,
+ * the review's description as the new body, and a comment that lists the
+ * feedback addressed. The body stays as it was when the review wrote none.
+ */
+export async function publishRevision(
+  input: PublishRevisionInput,
+): Promise<PublishSuccessfulRunResult> {
+  const git = input.git ?? execaGitRunner;
+  const gh = input.gh ?? execaGhRunner;
+  const pullRequest = input.revision.pullRequest;
+
+  if (!(await hasPublishableChanges({ cwd: input.cwd, git }))) {
+    throw new NoDiffError();
+  }
+
+  const commitMessage = `${input.issue.identifier} Address pull request feedback`;
+
+  await runRequired(git, ["config", "user.name", input.authorName], input.cwd);
+  await runRequired(git, ["config", "user.email", input.authorEmail], input.cwd);
+  await runRequired(git, ["add", "--all"], input.cwd);
+  await runRequired(git, ["commit", "-m", commitMessage], input.cwd);
+  const commit = (
+    await runRequired(git, ["rev-parse", "--short", "HEAD"], input.cwd)
+  ).stdout.trim();
+  // A plain push fails when someone else pushed to the branch meanwhile,
+  // instead of overwriting their commits.
+  await runRequired(
+    git,
+    ["push", "origin", `HEAD:refs/heads/${pullRequest.headBranch}`],
+    input.cwd,
+    input.env,
+  );
+
+  const apiPath = `repos/${pullRequest.repo.fullName}`;
+  let prBody = pullRequest.body;
+
+  if (input.metadata.description !== null) {
+    prBody = formatPrBody({ issue: input.issue, metadata: input.metadata });
+    await runRequired(
+      gh,
+      [
+        "api",
+        "--method",
+        "PATCH",
+        `${apiPath}/pulls/${pullRequest.number}`,
+        "-f",
+        `body=${prBody}`,
+        "--silent",
+      ],
+      input.cwd,
+      input.env,
+    );
+  }
+
+  await runRequired(
+    gh,
+    [
+      "api",
+      "--method",
+      "POST",
+      `${apiPath}/issues/${pullRequest.number}/comments`,
+      "-f",
+      `body=${formatRevisionComment({
+        revision: input.revision,
+        runId: input.metadata.runId,
+        commit,
+        verification: input.metadata.verification,
+      })}`,
+      "--silent",
+    ],
+    input.cwd,
+    input.env,
+  );
+
+  return {
+    branchName: pullRequest.headBranch,
+    commitMessage,
+    prTitle: pullRequest.title,
+    prBody,
+    prUrl: pullRequest.url,
+  };
+}
+
+export function formatRevisionComment(input: {
+  revision: RevisionContext;
+  runId: string;
+  commit: string;
+  verification: string[];
+}): string {
+  const feedback = input.revision.feedback
+    .map((item) => `- ${describeFeedback(item)}`)
+    .join("\n");
+  const verification =
+    input.verification.length === 0
+      ? "- Not recorded."
+      : input.verification.map((item) => `- ${item}`).join("\n");
+
+  return `${formatReviseMarker({ runId: input.runId, through: input.revision.feedbackThrough })}
+Agent Cage revised this pull request in run \`${input.runId}\` with commit ${input.commit}.
+
+Feedback addressed:
+${feedback}
+
+Verification:
+${verification}
+
+Review threads stay unresolved. Resolve the ones this commit settles; the next revise reads every unresolved thread again.
+`;
 }
 
 export function generateBranchName(input: {
